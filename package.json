@@ -2,7 +2,7 @@
   "name": "wifihammer",
   "version": "1.0.0",
   "private": true,
-  "description": "Airtel and Jio WiFi slow? No need to turn the router off and on. Just hammer hard.",
+  "description": "Airtel or Jio Wi‑Fi suddenly slow? One click wakes it, no walking to the router. Auto-hammer keeps WFH calls alive.",
   "main": "background.js",
   "scripts": {
     "test": "node tests.js"
