@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "WiFi Hammer",
   "description": "Airtel or Jio Wi‑Fi suddenly slow? One click wakes it — no walking to the router. Auto-hammer keeps WFH calls alive.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "permissions": [
     "alarms",
     "storage"

@@ -4,10 +4,14 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const RANGE_LABELS = {
   daily: "Last 24 hours"
 };
+const STATUS_FLASH_MS = 4000;
+const MIN_PROGRESS_MBPS = 0.1;
 
 let history = [];
 let selectedRange = "daily";
 let monitoringEnabled = true;
+let statusFlash = null;
+let statusFlashTimer = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("toggle-monitoring").addEventListener("click", toggleMonitoring);
@@ -39,15 +43,24 @@ document.addEventListener("DOMContentLoaded", () => {
 function handleSpeedTestProgress(progress) {
   const { phase, elapsedSeconds, totalSeconds, mbps } = progress;
   const remaining = Math.max(0, totalSeconds - elapsedSeconds);
-  const val = mbps >= 10 ? mbps.toFixed(1) : mbps.toFixed(2);
-  const phaseName = phase === "download" ? "Downloading" : "Uploading";
-  
-  setControlStatus(`${phaseName}... (${remaining}s)`);
-  
+  setControlStatus(`Waking Wi‑Fi… (${remaining}s)`);
+
   const elementId = phase === "download" ? "download-value" : "upload-value";
   const el = document.getElementById(elementId);
-  if (el) {
+  if (!el) return;
+
+  if (mbps >= MIN_PROGRESS_MBPS) {
+    const val = mbps >= 10 ? mbps.toFixed(1) : mbps.toFixed(2);
     el.innerHTML = `${val} <span class="metric-unit">Mbps</span>`;
+    return;
+  }
+
+  const latest = history[history.length - 1];
+  const known = latest ? latest[phase === "download" ? 1 : 2] : null;
+  if (Number.isFinite(known)) {
+    el.innerHTML = `${formatNumber(known)} <span class="metric-unit">Mbps</span><span class="metric-checking">checking…</span>`;
+  } else {
+    el.innerHTML = `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span><span class="metric-checking">checking…</span>`;
   }
 }
 
@@ -76,12 +89,13 @@ async function loadMonitoringState() {
     renderHealth(response.status);
   } catch (error) {
     console.error("Unable to load monitoring state:", error);
-    setControlStatus("Can't see status");
+    setControlStatus("Couldn't load status");
   }
 }
 
 async function updateFrequency(event) {
   const minutes = Number(event.target.value);
+  clearStatusFlash();
   try {
     const response = await sendMessage({ type: "setFrequency", minutes });
     if (!response?.ok) throw new Error(response?.error || "Unable to update frequency.");
@@ -96,6 +110,7 @@ async function updateFrequency(event) {
 async function toggleMonitoring() {
   const button = document.getElementById("toggle-monitoring");
   button.setAttribute("aria-busy", "true");
+  clearStatusFlash();
   try {
     const response = await sendMessage({ type: "setMonitoring", enabled: !monitoringEnabled });
     if (!response?.ok) throw new Error(response?.error || "Unable to update monitoring.");
@@ -111,22 +126,72 @@ async function toggleMonitoring() {
 
 async function runNow() {
   const button = document.getElementById("run-now");
-  if (!window.confirm("This can eat a lot of your data. Still check speed?")) return;
+  const label = document.getElementById("run-now-label");
+  if (!window.confirm("Hammer Hard uses more data. Wake Wi‑Fi hard now?")) return;
+  clearStatusFlash();
   button.setAttribute("aria-busy", "true");
+  if (label) label.textContent = "Hammering…";
   document.body.classList.add("hammering");
-  setControlStatus("Checking speed...");
+  setControlStatus("Waking Wi‑Fi…");
+  showCheckingMetrics();
   try {
     const response = await sendMessage({ type: "runNow" });
-    if (!response?.ok) throw new Error(response?.error || "The real speed test failed.");
-    renderHealth({ lastSuccessAt: response.result[0], lastError: null, mode: "full" });
-    setControlStatus("Done just now");
+    if (!response?.ok) throw new Error(response?.error || "Could not wake Wi‑Fi.");
+    await loadMonitoringState();
+    flashStatus("Wi‑Fi awake");
   } catch (error) {
-    console.error("Real speed test failed:", error);
-    setControlStatus("Speed test failed");
+    console.error("Hammer Hard failed:", error);
+    setControlStatus("Couldn't wake Wi‑Fi");
   } finally {
     button.removeAttribute("aria-busy");
+    if (label) label.textContent = "Hammer Hard";
     document.body.classList.remove("hammering");
   }
+}
+
+function showCheckingMetrics() {
+  const latest = history[history.length - 1];
+  ["download-value", "upload-value"].forEach((id, index) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const known = latest ? latest[index + 1] : null;
+    if (Number.isFinite(known)) {
+      el.innerHTML = `${formatNumber(known)} <span class="metric-unit">Mbps</span><span class="metric-checking">checking…</span>`;
+    } else {
+      el.innerHTML = `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span><span class="metric-checking">checking…</span>`;
+    }
+  });
+}
+
+function flashStatus(message) {
+  clearStatusFlash();
+  statusFlash = message;
+  setControlStatus(message);
+  statusFlashTimer = setTimeout(() => {
+    statusFlash = null;
+    statusFlashTimer = null;
+    applyIdleStatus();
+  }, STATUS_FLASH_MS);
+}
+
+function clearStatusFlash() {
+  if (statusFlashTimer) {
+    clearTimeout(statusFlashTimer);
+    statusFlashTimer = null;
+  }
+  statusFlash = null;
+}
+
+function applyIdleStatus() {
+  const pillText = document.getElementById("status-text");
+  if (!pillText) return;
+  if (!monitoringEnabled) {
+    pillText.textContent = "Paused";
+    return;
+  }
+  const isTesting = document.getElementById("run-now").getAttribute("aria-busy") === "true";
+  if (isTesting || statusFlash) return;
+  pillText.textContent = history.length > 0 ? "Ready" : "Starting…";
 }
 
 function renderControls() {
@@ -145,11 +210,13 @@ function renderControls() {
   if (!monitoringEnabled) {
     pill.dataset.state = "paused";
     pill.setAttribute("aria-label", "Monitoring paused");
+    if (!statusFlash) setControlStatus("Paused");
   } else if (history.length > 0) {
     pill.dataset.state = "ready";
-    pill.setAttribute("aria-label", "Monitoring active");
+    pill.setAttribute("aria-label", "Wi‑Fi wakes are on");
   } else {
     pill.dataset.state = "empty";
+    pill.setAttribute("aria-label", "No wakes yet");
   }
 }
 
@@ -165,12 +232,16 @@ function renderHealth(status) {
     if (healthText) healthText.textContent = "";
     health.dataset.state = "";
   } else if (status.lastError) {
-    if (healthText) healthText.textContent = `Last try failed: ${status.lastError}`;
+    if (healthText) healthText.textContent = `Last wake failed: ${status.lastError}`;
     health.dataset.state = "error";
-  } else if (status.lastSuccessAt) {
-    const kind = status.mode === "full" ? "Last speed test" : "Last check";
-    if (healthText) healthText.textContent = `${kind} · ${formatTimestamp(status.lastSuccessAt)}`;
-    health.dataset.state = "ok";
+  } else {
+    const parts = [];
+    const checkAt = status.lastCheckAt || (status.mode === "probe" ? status.lastSuccessAt : null);
+    const hammerAt = status.lastHammerAt || (status.mode === "full" ? status.lastSuccessAt : null);
+    if (checkAt) parts.push(`Last auto wake · ${formatTimestamp(checkAt)}`);
+    if (hammerAt) parts.push(`Last Hammer Hard · ${formatTimestamp(hammerAt)}`);
+    if (healthText) healthText.textContent = parts.join(" · ");
+    health.dataset.state = parts.length ? "ok" : "";
   }
 }
 
@@ -188,21 +259,34 @@ function sendMessage(message) {
 
 function render() {
   const latest = history[history.length - 1];
-  document.getElementById("download-value").innerHTML = latest
-    ? `${formatNumber(latest[1])} <span class="metric-unit">Mbps</span>`
-    : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
-  document.getElementById("upload-value").innerHTML = latest
-    ? `${formatNumber(latest[2])} <span class="metric-unit">Mbps</span>`
-    : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
-  document.getElementById("range-label").textContent = RANGE_LABELS[selectedRange];
-  const pill = document.getElementById("status");
-  const pillText = document.getElementById("status-text");
-  if (monitoringEnabled) {
-    const isTesting = document.getElementById("run-now").getAttribute("aria-busy") === "true";
-    pill.dataset.state = latest ? "ready" : "empty";
-    pill.setAttribute("aria-label", latest ? "WiFi checks are on" : "No checks yet");
-    if (pillText && !isTesting) pillText.textContent = latest ? "On" : "Waiting";
+  const isEmpty = !latest;
+  const isTesting = document.getElementById("run-now").getAttribute("aria-busy") === "true";
+  if (!isTesting) {
+    document.getElementById("download-value").innerHTML = latest
+      ? `${formatNumber(latest[1])} <span class="metric-unit">Mbps</span>`
+      : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
+    document.getElementById("upload-value").innerHTML = latest
+      ? `${formatNumber(latest[2])} <span class="metric-unit">Mbps</span>`
+      : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
   }
+  document.getElementById("range-label").textContent = RANGE_LABELS[selectedRange];
+  const subtitle = document.getElementById("chart-subtitle");
+  if (subtitle) {
+    subtitle.textContent = isEmpty
+      ? "Call lagging? Hit Hammer Hard — no walk to the router."
+      : "Auto wake keeps Wi‑Fi lively. Hammer Hard wakes it when stuck.";
+  }
+  const ispHint = document.getElementById("isp-hint");
+  if (ispHint) {
+    if (isEmpty) ispHint.removeAttribute("hidden");
+    else ispHint.setAttribute("hidden", "");
+  }
+  const pill = document.getElementById("status");
+  if (monitoringEnabled) {
+    pill.dataset.state = latest ? "ready" : "empty";
+    pill.setAttribute("aria-label", latest ? "Wi‑Fi wakes are on" : "No wakes yet");
+  }
+  applyIdleStatus();
   drawChart(selectPoints(history));
 }
 
@@ -215,9 +299,9 @@ function drawChart(points) {
     empty.setAttribute("y", "72");
     empty.setAttribute("text-anchor", "middle");
     empty.setAttribute("class", "axis-label");
-    empty.textContent = "Waiting for the first wake-up";
+    empty.textContent = "No wakes yet — first one runs soon";
     chart.append(empty);
-    chart.setAttribute("aria-label", "Nothing in the last 24 hours");
+    chart.setAttribute("aria-label", "No wakes in the last 24 hours");
     return;
   }
 
@@ -263,7 +347,7 @@ function drawChart(points) {
       label.textContent = formatAxisTime(points[index][0]);
       chart.append(label);
     });
-  chart.setAttribute("aria-label", `${points.length} checks. Latest download ${formatNumber(points.at(-1)[1])} Mbps, upload ${formatNumber(points.at(-1)[2])} Mbps.`);
+  chart.setAttribute("aria-label", `${points.length} wakes. Latest download ${formatNumber(points.at(-1)[1])} Mbps, upload ${formatNumber(points.at(-1)[2])} Mbps.`);
 }
 
 function formatAxisValue(value) {

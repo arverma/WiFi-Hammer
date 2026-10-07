@@ -19,15 +19,16 @@
           <span id="status-text">Status</span>
         </p>
         <h1>WiFi Hammer</h1>
-        <p class="tagline">No need to turn the router off and on</p>
-        <button class="about-button" id="about-button" type="button">Why this?</button>
+        <p class="tagline">Wake stuck Wi‑Fi without walking to the router.</p>
+        <p class="isp-hint" id="isp-hint">Made for sticky Airtel and Jio Wi‑Fi.</p>
+        <button class="about-button" id="about-button" type="button">Why this works</button>
       </div>
 
       <div class="header-actions">
-        <button class="btn-speed-test" id="run-now" type="button" aria-label="Run a real speed test now"
-          title="Run a real speed test now">
+        <button class="btn-speed-test" id="run-now" type="button" aria-label="Hammer Hard — wake stuck Wi‑Fi"
+          title="Hammer Hard — wake stuck Wi‑Fi">
           <img src="images/hammer.png" alt="Hammer">
-          Hammer Hard
+          <span id="run-now-label">Hammer Hard</span>
         </button>
 
       </div>
@@ -45,11 +46,11 @@
         </button>
         <div class="interval-wrap">
           <span class="interval-label">Every</span>
-          <select class="frequency-select" id="frequency" aria-label="Automatic check interval">
+          <select class="frequency-select" id="frequency" aria-label="Automatic wake interval">
             <option value="5">5 min</option>
             <option value="10">10 min</option>
             <option value="15">15 min</option>
-            <option value="30">30 min</option>
+            <option value="30" selected>30 min</option>
             <option value="60">1 hr</option>
             <option value="120">2 hr</option>
             <option value="180">3 hr</option>
@@ -64,7 +65,7 @@
 
 
   <!-- ── METRIC CARDS ────────────────────────────────────── -->
-  <section class="metrics-section" aria-label="Latest speed">
+  <section class="metrics-section" aria-label="Latest Wi‑Fi speed">
     <div class="metric-card download">
       <div class="metric-label">
         <span class="metric-label-dot"></span>Download
@@ -89,10 +90,10 @@
       <span class="chart-title">Today</span>
       <span class="chart-range" id="range-label">Last 24 hours</span>
     </div>
-    <p class="chart-subtitle">Leave the router on. Hammer Hard checks real speed.</p>
+    <p class="chart-subtitle" id="chart-subtitle">Auto wake keeps Wi‑Fi lively. Hammer Hard wakes it when stuck.</p>
 
     <div class="chart-wrap">
-      <svg id="chart" viewBox="0 0 340 132" role="img" aria-label="Speed trend chart"></svg>
+      <svg id="chart" viewBox="0 0 340 132" role="img" aria-label="Wi‑Fi speed over the last 24 hours"></svg>
     </div>
   </section>
 
@@ -100,7 +101,7 @@
   <div class="about-panel" id="about-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="about-title">
     <div class="dialog-inner">
       <div class="dialog-header">
-        <span class="dialog-title" id="about-title">Why this?</span>
+        <span class="dialog-title" id="about-title">Why this works</span>
         <button class="close-button" id="close-about" type="button" aria-label="Close">&times;</button>
       </div>
 
@@ -109,18 +110,18 @@
       <div class="fact-card">
         <span class="fact-icon">&#128564;</span>
         <div class="fact-body">
-          <p class="fact-title">You turn the router off and on</p>
-          <p class="fact-desc">Airtel or Jio WiFi gets stuck. You switch the router off and on. The page opens.
-            It works, so you keep doing it.</p>
+          <p class="fact-title">You restart the router</p>
+          <p class="fact-desc">Airtel or Jio Wi‑Fi stalls. You turn the router off and on, pages load again, so
+            you keep doing that walk.</p>
         </div>
       </div>
 
       <div class="fact-card">
         <span class="fact-icon">&#128506;</span>
         <div class="fact-body">
-          <p class="fact-title">That only wakes the WiFi</p>
-          <p class="fact-desc">The WiFi went lazy. The restart woke it up. You can hammer it instead and leave
-            the router on.</p>
+          <p class="fact-title">Restart only wakes Wi‑Fi</p>
+          <p class="fact-desc">The link went idle. A restart wakes it. This app does that wake-up for you and
+            leaves the router alone.</p>
         </div>
       </div>
 
@@ -129,34 +130,34 @@
       <div class="fact-card">
         <span class="fact-icon">&#127959;</span>
         <div class="fact-body">
-          <p class="fact-title">Just hammer hard</p>
-          <p class="fact-desc">Hit Hammer Hard, or let it run every few minutes. The next page opens. No walk
-            to the router.</p>
+          <p class="fact-title">Hammer or let it run</p>
+          <p class="fact-desc">Tap Hammer Hard when a call stalls, or leave auto wakes on. Same wake-up, no
+            trip to the router.</p>
         </div>
       </div>
 
       <div class="fact-card">
         <span class="fact-icon">&#128678;</span>
         <div class="fact-body">
-          <p class="fact-title">See the whole day</p>
-          <p class="fact-desc">Look at the last 24 hours. Was WiFi ok, or was it lazy? Hammer Hard checks real
-            speed. It can eat a lot of your data.</p>
+          <p class="fact-title">See the last 24 hours</p>
+          <p class="fact-desc">The chart shows auto wakes. Hammer Hard wakes harder when stuck and can use more
+            data.</p>
         </div>
       </div>
 
       <p class="dialog-eyebrow" style="margin-top:16px">Good to know</p>
 
       <ul class="insight-list">
-        <li>No need to turn the router off and on</li>
-        <li>Pick how often, from 5 minutes to 6 hours</li>
-        <li>Pause it anytime</li>
-        <li>Today's record stays on this laptop only</li>
-        <li>Speed test numbers stay off the daily chart</li>
-        <li>If a check fails, you will see it</li>
+        <li>Skip the router restart</li>
+        <li>Auto wake every 5 minutes to 6 hours</li>
+        <li>Pause anytime</li>
+        <li>History stays on this laptop only</li>
+        <li>Hammer Hard stays off this chart</li>
+        <li>Failed wakes show up here</li>
       </ul>
 
       <p class="disclaimer">
-        This does not make your Airtel or Jio plan faster. It depends on your WiFi and router.
+        This does not make your Airtel or Jio plan faster — it only wakes stuck Wi‑Fi.
       </p>
     </div>
   </div>

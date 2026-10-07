@@ -120,27 +120,30 @@ async function setFrequency(value) {
 
 async function runSpeedNudge({ fullTest = false } = {}) {
   if (measurementInFlight) {
-    throw new Error("A speed test is already on.");
+    throw new Error("A wake-up is already running.");
   }
   measurementInFlight = true;
   const startedAt = Date.now();
   try {
     const test = await measureConnection({ fullTest });
     if (!Number.isFinite(test.downloadMbps) || !Number.isFinite(test.uploadMbps)) {
-      throw new Error("The speed test did not give a proper result.");
+      throw new Error("Could not wake Wi‑Fi this time.");
     }
 
     const now = Date.now();
     const historyKey = fullTest ? REAL_TEST_HISTORY_KEY : WAKE_HISTORY_KEY;
-    const stored = await chrome.storage.local.get(historyKey);
+    const stored = await chrome.storage.local.get([historyKey, STATUS_KEY]);
     const history = pruneHistory(stored[historyKey], now);
     history.push([now, roundMbps(test.downloadMbps), roundMbps(test.uploadMbps)]);
+    const previous = stored[STATUS_KEY] || {};
     await chrome.storage.local.set({
       [historyKey]: history,
       [STATUS_KEY]: {
         lastAttemptAt: startedAt,
         lastSuccessAt: now,
         lastError: null,
+        lastCheckAt: fullTest ? previous.lastCheckAt || null : now,
+        lastHammerAt: fullTest ? now : previous.lastHammerAt || null,
         downloadMbps: roundMbps(test.downloadMbps),
         uploadMbps: roundMbps(test.uploadMbps),
         unloadedLatencyMs: test.unloadedLatencyMs,
@@ -155,11 +158,14 @@ async function runSpeedNudge({ fullTest = false } = {}) {
   } catch (error) {
     console.warn("WiFi Hammer speed nudge failed:", error);
     const previous = await chrome.storage.local.get(STATUS_KEY);
+    const prior = previous[STATUS_KEY] || {};
     await chrome.storage.local.set({
       [STATUS_KEY]: {
         lastAttemptAt: startedAt,
-        lastSuccessAt: previous[STATUS_KEY]?.lastSuccessAt || null,
-        lastError: error instanceof Error ? error.message : "Speed test failed."
+        lastSuccessAt: prior.lastSuccessAt || null,
+        lastCheckAt: prior.lastCheckAt || null,
+        lastHammerAt: prior.lastHammerAt || null,
+        lastError: error instanceof Error ? error.message : "Wake-up failed."
       }
     });
     throw error;
@@ -172,7 +178,7 @@ async function measureConnection({ fullTest = false } = {}) {
   const config = await fetchFastConfig();
   const targets = Array.isArray(config.targets) ? config.targets : [];
   if (targets.length === 0) {
-    throw new Error("Could not find a server to test.");
+    throw new Error("Could not reach the network.");
   }
 
   let lastError;
@@ -183,7 +189,7 @@ async function measureConnection({ fullTest = false } = {}) {
       lastError = error;
     }
   }
-  throw lastError || new Error("All test servers failed.");
+  throw lastError || new Error("Network wake-up failed.");
 }
 
 async function measureTarget(target, targets, fullTest) {
@@ -307,7 +313,7 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
 
   const elapsedSeconds = Math.max((performance.now() - started) / 1000, MIN_TEST_SECONDS);
   const bytes = bytesByConnection.reduce((sum, value) => sum + value, 0);
-  if (bytes <= 0) throw new Error(`The ${type} test got no data.`);
+  if (bytes <= 0) throw new Error("Got no data back from the network.");
   return { mbps: (bytes * 8) / elapsedSeconds / 1_000_000, bytes };
 }
 
@@ -320,7 +326,7 @@ async function fetchFastConfig() {
   const scriptMatch = homeHtml.match(/<script[^>]+src\s*=\s*["'](\/app-[^"']+\.js)["']/i)
     || homeHtml.match(/(\/app-[^"'<>]+\.js)/i);
   if (!scriptMatch) {
-    throw new Error("Could not start the speed check.");
+    throw new Error("Could not start the wake-up.");
   }
 
   const scriptResponse = await fetchWithTimeout(new URL(scriptMatch[1], FAST_HOME_URL), {
@@ -330,7 +336,7 @@ async function fetchFastConfig() {
   const script = await scriptResponse.text();
   const tokenMatch = script.match(/getTestOcasParams\s*:\s*\{[^}]*?token\s*:\s*["']([^"']+)["']/);
   if (!tokenMatch) {
-    throw new Error("Could not start the speed check.");
+    throw new Error("Could not start the wake-up.");
   }
 
   const configUrl = appendQuery(CONFIG_ENDPOINT, {
