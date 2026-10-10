@@ -277,8 +277,9 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
           headers: type === "upload" ? { "Content-Type": "application/octet-stream" } : {},
           signal: controller.signal
         });
-        const data = await response.arrayBuffer();
-        bytesByConnection[workerIndex] += type === "upload" ? chunkBytes : data.byteLength;
+        await readMeasuredBody(type, response, chunkBytes, (byteLength) => {
+          bytesByConnection[workerIndex] += byteLength;
+        });
       } catch (error) {
         if (controller.signal.aborted) return;
         throw error;
@@ -315,6 +316,32 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
   const bytes = bytesByConnection.reduce((sum, value) => sum + value, 0);
   if (bytes <= 0) throw new Error("Got no data back from the network.");
   return { mbps: (bytes * 8) / elapsedSeconds / 1_000_000, bytes };
+}
+
+async function readMeasuredBody(type, response, chunkBytes, onBytes) {
+  if (type === "upload") {
+    await response.arrayBuffer();
+    onBytes(chunkBytes);
+    return chunkBytes;
+  }
+
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const data = await response.arrayBuffer();
+    onBytes(data.byteLength);
+    return data.byteLength;
+  }
+
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const byteLength = value?.byteLength || 0;
+    if (byteLength <= 0) continue;
+    total += byteLength;
+    onBytes(byteLength);
+  }
+  return total;
 }
 
 async function fetchFastConfig() {
