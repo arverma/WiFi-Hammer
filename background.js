@@ -4,29 +4,176 @@ const REAL_TEST_HISTORY_KEY = "realTestHistory";
 const MONITORING_KEY = "monitoringEnabled";
 const FREQUENCY_KEY = "frequencyMinutes";
 const STATUS_KEY = "monitorStatus";
+const INSTALL_DATE_KEY = "installedAt";
+const WAKE_ATTEMPTS_KEY = "totalWakeAttempts";
+const WAKE_SUCCESSES_KEY = "totalWakeSuccesses";
+const MAX_UNINSTALL_URL_LENGTH = 1023;
 const DEFAULT_FREQUENCY_MINUTES = 30;
 const MIN_FREQUENCY_MINUTES = 5;
 const MAX_FREQUENCY_MINUTES = 360;
 const FAST_HOME_URL = "https://fast.com/";
 const CONFIG_ENDPOINT = "https://api.fast.com/netflix/speedtest/v2";
+const FAST_FALLBACK_TOKEN = "YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm";
 const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours — rolling window
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 const MIN_CONNECTIONS = 1;
 const MAX_CONNECTIONS = 8;
 const MIN_TEST_SECONDS = 5;
-const MAX_TEST_SECONDS = 30;
+const MAX_TEST_SECONDS = 10;
 const DOWNLOAD_CHUNK_BYTES = 26_214_400;
 const UPLOAD_CHUNK_BYTES = 2_621_440;
 const PROBE_DOWNLOAD_BYTES = 128_000;
 const PROBE_UPLOAD_BYTES = 64_000;
 let measurementInFlight = false;
 
-chrome.runtime.onInstalled.addListener(() => {
+if (typeof importScripts === "function") {
+  try {
+    importScripts("analytics-config.js", "analytics.js", "diagnostics.js");
+  } catch (err) {
+    console.warn("WiFi Hammer analytics/diagnostics failed to load:", err);
+  }
+}
+
+function sendAnalyticsEvent(name, params) {
+  if (typeof trackEvent === "function") {
+    void trackEvent(name, params);
+  }
+}
+
+function logBackgroundDiagnostic(event, details = null, error = null) {
+  if (typeof logDiagnostic === "function") {
+    void logDiagnostic("background", event, details, error);
+  }
+}
+
+function categorizeWakeError(error) {
+  const msg = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+  if (msg.includes("already running")) return "already_running";
+  if (msg.includes("reach the network") || msg.includes("offline")) return "offline";
+  if (msg.includes("abort") || msg.includes("timeout") || msg.includes("timed out")) return "timeout";
+  if (msg.includes("probe") || msg.includes("network wake-up failed")) return "probe_failed";
+  if (msg.includes("could not wake")) return "invalid_speed";
+  if (msg.includes("failed to fetch") || msg.includes("networkerror")) return "network_error";
+  return "wake_failed";
+}
+
+function getUninstallConfigUrl() {
+  const config = (typeof self !== "undefined" && self.ANALYTICS_CONFIG)
+    ? self.ANALYTICS_CONFIG
+    : (typeof globalThis !== "undefined" && globalThis.ANALYTICS_CONFIG)
+      ? globalThis.ANALYTICS_CONFIG
+      : null;
+  return config?.UNINSTALL_URL || config?.FEEDBACK_FORM_URL || "";
+}
+
+function buildUninstallURL({ baseUrl, version, os, daysInstalled, attempts, successes }) {
+  if (!baseUrl || typeof baseUrl !== "string") return "";
+  const trimmed = baseUrl.trim();
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return "";
+
+  try {
+    const url = new URL(trimmed);
+    if (version) url.searchParams.set("v", String(version).slice(0, 20));
+    if (os) url.searchParams.set("os", String(os).slice(0, 20));
+    if (Number.isFinite(daysInstalled)) url.searchParams.set("days", String(Math.max(0, Math.floor(daysInstalled))));
+    if (Number.isFinite(attempts)) url.searchParams.set("attempts", String(Math.max(0, Math.floor(attempts))));
+    if (Number.isFinite(successes)) url.searchParams.set("successes", String(Math.max(0, Math.floor(successes))));
+
+    let finalUrl = url.toString();
+    if (finalUrl.length <= MAX_UNINSTALL_URL_LENGTH) {
+      return finalUrl;
+    }
+
+    const nonEssentialParams = ["attempts", "successes", "days", "os", "v"];
+    for (const p of nonEssentialParams) {
+      url.searchParams.delete(p);
+      finalUrl = url.toString();
+      if (finalUrl.length <= MAX_UNINSTALL_URL_LENGTH) {
+        return finalUrl;
+      }
+    }
+    return finalUrl.slice(0, MAX_UNINSTALL_URL_LENGTH);
+  } catch {
+    return "";
+  }
+}
+
+async function incrementWakeCounter(key) {
+  try {
+    const stored = await chrome.storage.local.get(key);
+    const current = typeof stored[key] === "number" ? stored[key] : 0;
+    await chrome.storage.local.set({ [key]: current + 1 });
+  } catch {
+    // Fail silently
+  }
+}
+
+async function syncUninstallURL() {
+  if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.setUninstallURL !== "function") {
+    return;
+  }
+  try {
+    const baseUrl = getUninstallConfigUrl();
+    if (!baseUrl) {
+      await chrome.runtime.setUninstallURL("");
+      return;
+    }
+
+    const stored = await chrome.storage.local.get([INSTALL_DATE_KEY, WAKE_ATTEMPTS_KEY, WAKE_SUCCESSES_KEY]);
+    let installedAt = stored[INSTALL_DATE_KEY];
+    if (!installedAt || typeof installedAt !== "number") {
+      installedAt = Date.now();
+      await chrome.storage.local.set({ [INSTALL_DATE_KEY]: installedAt });
+    }
+
+    const attempts = typeof stored[WAKE_ATTEMPTS_KEY] === "number" ? stored[WAKE_ATTEMPTS_KEY] : 0;
+    const successes = typeof stored[WAKE_SUCCESSES_KEY] === "number" ? stored[WAKE_SUCCESSES_KEY] : 0;
+    const daysInstalled = Math.max(0, Math.floor((Date.now() - installedAt) / (1000 * 60 * 60 * 24)));
+
+    let os = "unknown";
+    if (typeof chrome.runtime.getPlatformInfo === "function") {
+      try {
+        const info = await chrome.runtime.getPlatformInfo();
+        if (info?.os) os = info.os;
+      } catch {
+        // ignore
+      }
+    }
+
+    const manifest = typeof chrome.runtime.getManifest === "function" ? chrome.runtime.getManifest() : null;
+    const version = manifest?.version || "unknown";
+
+    const uninstallUrl = buildUninstallURL({
+      baseUrl,
+      version,
+      os,
+      daysInstalled,
+      attempts,
+      successes
+    });
+
+    await chrome.runtime.setUninstallURL(uninstallUrl);
+  } catch {
+    // Fail silently
+  }
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
   void ensureAlarm();
+  void syncUninstallURL();
+  const manifest = (typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.getManifest === "function")
+    ? chrome.runtime.getManifest()
+    : { version: "unknown" };
+  sendAnalyticsEvent("extension_installed", {
+    reason: details?.reason || "install",
+    version: manifest?.version || "unknown",
+    previous_version: details?.previousVersion || ""
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void ensureAlarm();
+  void syncUninstallURL();
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -64,8 +211,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
     void getMonitoringState().then((state) => {
-      if (state.enabled) return runSpeedNudge({ fullTest: false });
+      if (state.enabled) {
+        logBackgroundDiagnostic("alarm_pulse", { minutes: state.minutes });
+        sendAnalyticsEvent("auto_hammer_pulse", {
+          frequency_minutes: state.minutes
+        });
+        return runSpeedNudge({ fullTest: false });
+      }
     }).catch((error) => {
+      logBackgroundDiagnostic("alarm_handler_error", null, error);
       console.warn("WiFi Hammer alarm handler failed:", error);
     });
   }
@@ -120,15 +274,21 @@ async function setFrequency(value) {
 
 async function runSpeedNudge({ fullTest = false } = {}) {
   if (measurementInFlight) {
+    logBackgroundDiagnostic("wake_aborted", { reason: "already_running" });
     throw new Error("A wake-up is already running.");
   }
   measurementInFlight = true;
   const startedAt = Date.now();
+  logBackgroundDiagnostic("wake_start", { mode: fullTest ? "manual" : "auto" });
+  await incrementWakeCounter(WAKE_ATTEMPTS_KEY);
   try {
     const test = await measureConnection({ fullTest });
     if (!Number.isFinite(test.downloadMbps) || !Number.isFinite(test.uploadMbps)) {
       throw new Error("Could not wake Wi‑Fi this time.");
     }
+
+    await incrementWakeCounter(WAKE_SUCCESSES_KEY);
+    void syncUninstallURL();
 
     const now = Date.now();
     const historyKey = fullTest ? REAL_TEST_HISTORY_KEY : WAKE_HISTORY_KEY;
@@ -136,6 +296,24 @@ async function runSpeedNudge({ fullTest = false } = {}) {
     const history = pruneHistory(stored[historyKey], now);
     history.push([now, roundMbps(test.downloadMbps), roundMbps(test.uploadMbps)]);
     const previous = stored[STATUS_KEY] || {};
+    const beforeDownload = Number.isFinite(previous.downloadMbps) ? previous.downloadMbps : null;
+    const beforeUpload = Number.isFinite(previous.uploadMbps) ? previous.uploadMbps : null;
+    const timeToRecoverMs = Math.max(0, now - startedAt);
+    logBackgroundDiagnostic("wake_success", {
+      mode: fullTest ? "manual" : "auto",
+      downloadMbps: roundMbps(test.downloadMbps),
+      uploadMbps: roundMbps(test.uploadMbps),
+      timeToRecoverMs,
+      server: test.server
+    });
+    sendAnalyticsEvent("wake_success", {
+      trigger: fullTest ? "manual" : "auto",
+      time_to_recover_ms: timeToRecoverMs,
+      before_download_mbps: beforeDownload,
+      after_download_mbps: roundMbps(test.downloadMbps),
+      before_upload_mbps: beforeUpload,
+      after_upload_mbps: roundMbps(test.uploadMbps)
+    });
     await chrome.storage.local.set({
       [historyKey]: history,
       [STATUS_KEY]: {
@@ -156,6 +334,18 @@ async function runSpeedNudge({ fullTest = false } = {}) {
     });
     return history.at(-1);
   } catch (error) {
+    const timeToFailMs = Math.max(0, Date.now() - startedAt);
+    const errorType = categorizeWakeError(error);
+    logBackgroundDiagnostic("wake_failed", {
+      mode: fullTest ? "manual" : "auto",
+      errorType,
+      timeToFailMs
+    }, error);
+    sendAnalyticsEvent("wake_failed", {
+      trigger: fullTest ? "manual" : "auto",
+      error_type: errorType,
+      time_to_fail_ms: timeToFailMs
+    });
     console.warn("WiFi Hammer speed nudge failed:", error);
     const previous = await chrome.storage.local.get(STATUS_KEY);
     const prior = previous[STATUS_KEY] || {};
@@ -168,6 +358,7 @@ async function runSpeedNudge({ fullTest = false } = {}) {
         lastError: error instanceof Error ? error.message : "Wake-up failed."
       }
     });
+    void syncUninstallURL();
     throw error;
   } finally {
     measurementInFlight = false;
@@ -282,7 +473,8 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
         });
       } catch (error) {
         if (controller.signal.aborted) return;
-        throw error;
+        logBackgroundDiagnostic("worker_conn_reset", { workerIndex, type }, error);
+        break;
       } finally {
         controllers.delete(controller);
       }
@@ -345,30 +537,38 @@ async function readMeasuredBody(type, response, chunkBytes, onBytes) {
 }
 
 async function fetchFastConfig() {
-  const homeResponse = await fetchWithTimeout(FAST_HOME_URL, {
-    cache: "no-store",
-    credentials: "omit"
-  });
-  const homeHtml = await homeResponse.text();
-  const scriptMatch = homeHtml.match(/<script[^>]+src\s*=\s*["'](\/app-[^"']+\.js)["']/i)
-    || homeHtml.match(/(\/app-[^"'<>]+\.js)/i);
-  if (!scriptMatch) {
-    throw new Error("Could not start the wake-up.");
+  let token = null;
+  try {
+    const homeResponse = await fetchWithTimeout(FAST_HOME_URL, {
+      cache: "no-store",
+      credentials: "omit"
+    });
+    const homeHtml = await homeResponse.text();
+    const scriptMatch = homeHtml.match(/<script[^>]+src\s*=\s*["'](\/app-[^"']+\.js)["']/i)
+      || homeHtml.match(/(\/app-[^"'<>]+\.js)/i);
+    if (scriptMatch) {
+      const scriptResponse = await fetchWithTimeout(new URL(scriptMatch[1], FAST_HOME_URL), {
+        cache: "no-store",
+        credentials: "omit"
+      });
+      const script = await scriptResponse.text();
+      const tokenMatch = script.match(/getTestOcasParams\s*:\s*\{[^}]*?token\s*:\s*["']([^"']+)["']/);
+      if (tokenMatch) {
+        token = tokenMatch[1];
+      }
+    }
+  } catch (err) {
+    logBackgroundDiagnostic("fast_scrape_failed", { note: "Falling back to default token" }, err);
   }
 
-  const scriptResponse = await fetchWithTimeout(new URL(scriptMatch[1], FAST_HOME_URL), {
-    cache: "no-store",
-    credentials: "omit"
-  });
-  const script = await scriptResponse.text();
-  const tokenMatch = script.match(/getTestOcasParams\s*:\s*\{[^}]*?token\s*:\s*["']([^"']+)["']/);
-  if (!tokenMatch) {
-    throw new Error("Could not start the wake-up.");
+  if (!token) {
+    token = FAST_FALLBACK_TOKEN;
+    logBackgroundDiagnostic("fast_token_fallback", { token: FAST_FALLBACK_TOKEN });
   }
 
   const configUrl = appendQuery(CONFIG_ENDPOINT, {
     https: "true",
-    token: tokenMatch[1],
+    token,
     urlCount: 5
   });
   return fetchJson(configUrl);

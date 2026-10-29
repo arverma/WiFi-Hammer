@@ -6,6 +6,10 @@ const RANGE_LABELS = {
 };
 const STATUS_FLASH_MS = 4000;
 const MIN_PROGRESS_MBPS = 0.1;
+const RATING_STATE_KEY = "ratingPromptState";
+const WAKE_SUCCESSES_KEY = "totalWakeSuccesses";
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+const CWS_REVIEWS_URL = "https://chromewebstore.google.com/detail/wifi-hammer/dbphaafiokokiaocpcnfakompafjoddj/reviews";
 
 let history = [];
 let selectedRange = "daily";
@@ -13,32 +17,55 @@ let monitoringEnabled = true;
 let statusFlash = null;
 let statusFlashTimer = null;
 
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("toggle-monitoring").addEventListener("click", toggleMonitoring);
-  document.getElementById("run-now").addEventListener("click", runNow);
-  document.getElementById("frequency").addEventListener("change", updateFrequency);
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && (changes[HISTORY_KEY] || changes.monitorStatus || changes.monitoringEnabled || changes.frequencyMinutes)) {
-      void loadHistory();
-      void loadMonitoringState();
-    }
-  });
-  const aboutPanel = document.getElementById("about-dialog");
-  document.getElementById("about-button").addEventListener("click", () => {
-    aboutPanel.removeAttribute("hidden");
-  });
-  document.getElementById("close-about").addEventListener("click", () => {
-    aboutPanel.setAttribute("hidden", "");
-  });
+if (typeof document !== "undefined") {
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("toggle-monitoring").addEventListener("click", toggleMonitoring);
+    document.getElementById("run-now").addEventListener("click", runNow);
+    document.getElementById("frequency").addEventListener("change", updateFrequency);
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && (changes[HISTORY_KEY] || changes.monitorStatus || changes.monitoringEnabled || changes.frequencyMinutes)) {
+        void loadHistory();
+        void loadMonitoringState();
+      }
+    });
+    const aboutPanel = document.getElementById("about-dialog");
+    document.getElementById("about-button").addEventListener("click", () => {
+      aboutPanel.removeAttribute("hidden");
+    });
+    document.getElementById("close-about").addEventListener("click", () => {
+      aboutPanel.setAttribute("hidden", "");
+    });
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === "speedTestProgress") {
-      handleSpeedTestProgress(message);
-    }
-  });
+    const rateBtn = document.getElementById("rating-rate-btn");
+    if (rateBtn) rateBtn.addEventListener("click", handleRateClicked);
 
-  void initialize();
-});
+    const neverBtn = document.getElementById("rating-never-btn");
+    if (neverBtn) neverBtn.addEventListener("click", handleNeverClicked);
+
+    const closeRatingBtn = document.getElementById("rating-close");
+    if (closeRatingBtn) closeRatingBtn.addEventListener("click", handleDismissClicked);
+
+    const openDiagBtn = document.getElementById("open-diagnostics");
+    if (openDiagBtn) openDiagBtn.addEventListener("click", openDiagnostics);
+
+    const closeDiagBtn = document.getElementById("close-diagnostics");
+    if (closeDiagBtn) closeDiagBtn.addEventListener("click", closeDiagnostics);
+
+    const copyDiagBtn = document.getElementById("diagnostics-copy");
+    if (copyDiagBtn) copyDiagBtn.addEventListener("click", copyDiagnostics);
+
+    const clearDiagBtn = document.getElementById("diagnostics-clear");
+    if (clearDiagBtn) clearDiagBtn.addEventListener("click", clearDiagnosticsLogs);
+
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.type === "speedTestProgress") {
+        handleSpeedTestProgress(message);
+      }
+    });
+
+    void initialize();
+  });
+}
 
 function handleSpeedTestProgress(progress) {
   const { phase, elapsedSeconds, totalSeconds, mbps } = progress;
@@ -64,8 +91,117 @@ function handleSpeedTestProgress(progress) {
   }
 }
 
+function sendAnalyticsEvent(name, params) {
+  if (typeof trackEvent === "function") {
+    void trackEvent(name, params);
+  }
+}
+
+function shouldShowRatingPrompt({ successes, dismissedForever, lastPromptedAt, now = Date.now() }) {
+  if (dismissedForever) return false;
+  if (typeof successes !== "number" || successes < 3) return false;
+  if (lastPromptedAt && (now - lastPromptedAt) < FOURTEEN_DAYS_MS) return false;
+  return true;
+}
+
+async function checkAndShowRatingPrompt() {
+  const banner = document.getElementById("rating-banner");
+  if (!banner) return;
+
+  try {
+    const stored = await chrome.storage.local.get([
+      RATING_STATE_KEY,
+      WAKE_SUCCESSES_KEY,
+      HISTORY_KEY
+    ]);
+    const state = stored[RATING_STATE_KEY] || {};
+    const rawSuccesses = stored[WAKE_SUCCESSES_KEY];
+    const wakeHistory = stored[HISTORY_KEY];
+    const successes = typeof rawSuccesses === "number"
+      ? rawSuccesses
+      : (Array.isArray(wakeHistory) ? wakeHistory.length : 0);
+
+    const now = Date.now();
+    if (!shouldShowRatingPrompt({
+      successes,
+      dismissedForever: Boolean(state.dismissedForever),
+      lastPromptedAt: state.lastPromptedAt,
+      now
+    })) {
+      return;
+    }
+
+    banner.removeAttribute("hidden");
+    await chrome.storage.local.set({
+      [RATING_STATE_KEY]: {
+        ...state,
+        lastPromptedAt: now
+      }
+    });
+    sendAnalyticsEvent("rating_prompt_shown");
+  } catch (err) {
+    console.warn("WiFi Hammer rating prompt check failed:", err);
+  }
+}
+
+async function handleRateClicked() {
+  const banner = document.getElementById("rating-banner");
+  if (banner) banner.setAttribute("hidden", "");
+
+  try {
+    const stored = await chrome.storage.local.get(RATING_STATE_KEY);
+    const state = stored[RATING_STATE_KEY] || {};
+    await chrome.storage.local.set({
+      [RATING_STATE_KEY]: {
+        ...state,
+        dismissedForever: true,
+        ratedAt: Date.now()
+      }
+    });
+  } catch {
+    // Ignore
+  }
+
+  sendAnalyticsEvent("rating_prompt_clicked");
+
+  if (typeof chrome !== "undefined" && chrome.tabs && typeof chrome.tabs.create === "function") {
+    chrome.tabs.create({ url: CWS_REVIEWS_URL });
+  } else {
+    window.open(CWS_REVIEWS_URL, "_blank");
+  }
+}
+
+async function handleNeverClicked() {
+  const banner = document.getElementById("rating-banner");
+  if (banner) banner.setAttribute("hidden", "");
+
+  try {
+    const stored = await chrome.storage.local.get(RATING_STATE_KEY);
+    const state = stored[RATING_STATE_KEY] || {};
+    await chrome.storage.local.set({
+      [RATING_STATE_KEY]: {
+        ...state,
+        dismissedForever: true,
+        dismissedAt: Date.now()
+      }
+    });
+  } catch {
+    // Ignore
+  }
+
+  sendAnalyticsEvent("rating_prompt_dismissed", { reason: "dont_ask_again" });
+}
+
+function handleDismissClicked() {
+  const banner = document.getElementById("rating-banner");
+  if (banner) banner.setAttribute("hidden", "");
+  sendAnalyticsEvent("rating_prompt_dismissed", { reason: "close" });
+}
+
 async function initialize() {
+  sendAnalyticsEvent("popup_opened");
   await Promise.all([loadHistory(), loadMonitoringState()]);
+  void checkAndShowRatingPrompt();
 }
 
 async function loadHistory() {
@@ -115,6 +251,9 @@ async function toggleMonitoring() {
     const response = await sendMessage({ type: "setMonitoring", enabled: !monitoringEnabled });
     if (!response?.ok) throw new Error(response?.error || "Unable to update monitoring.");
     monitoringEnabled = response.enabled;
+    sendAnalyticsEvent("auto_hammer_toggled", {
+      enabled: monitoringEnabled ? "on" : "off"
+    });
     renderControls();
   } catch (error) {
     console.error("Unable to update monitoring:", error);
@@ -124,10 +263,44 @@ async function toggleMonitoring() {
   }
 }
 
+let confirmTimeout = null;
+
+function logPopupDiagnostic(event, details = null, error = null) {
+  if (typeof logDiagnostic === "function") {
+    void logDiagnostic("popup", event, details, error);
+  }
+}
+
 async function runNow() {
   const button = document.getElementById("run-now");
   const label = document.getElementById("run-now-label");
-  if (!window.confirm("Hammer Hard uses more data. Wake Wi‑Fi hard now?")) return;
+
+  // On Windows Chrome, window.confirm() causes the popup to lose window focus and unload.
+  // Instead, use an inline confirmation state directly on the button.
+  if (!button.classList.contains("confirming")) {
+    button.classList.add("confirming");
+    if (label) label.textContent = "Confirm Hammer?";
+    setControlStatus("Tap again to wake Wi‑Fi hard");
+    logPopupDiagnostic("hammer_click_unconfirmed");
+
+    if (confirmTimeout) clearTimeout(confirmTimeout);
+    confirmTimeout = setTimeout(() => {
+      button.classList.remove("confirming");
+      if (label) label.textContent = "Hammer Hard";
+      applyIdleStatus();
+      confirmTimeout = null;
+    }, 4000);
+    return;
+  }
+
+  if (confirmTimeout) {
+    clearTimeout(confirmTimeout);
+    confirmTimeout = null;
+  }
+  button.classList.remove("confirming");
+
+  sendAnalyticsEvent("hammer_clicked", { trigger: "manual" });
+  logPopupDiagnostic("hammer_confirmed");
   clearStatusFlash();
   button.setAttribute("aria-busy", "true");
   if (label) label.textContent = "Hammering…";
@@ -139,8 +312,10 @@ async function runNow() {
     if (!response?.ok) throw new Error(response?.error || "Could not wake Wi‑Fi.");
     await loadMonitoringState();
     flashStatus("Wi‑Fi awake");
+    void checkAndShowRatingPrompt();
   } catch (error) {
     console.error("Hammer Hard failed:", error);
+    logPopupDiagnostic("hammer_failed", null, error);
     setControlStatus("Couldn't wake Wi‑Fi");
   } finally {
     button.removeAttribute("aria-busy");
@@ -411,4 +586,160 @@ function renderEmpty(message) {
   empty.setAttribute("class", "axis-label");
   empty.textContent = message;
   chart.append(empty);
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function openDiagnostics() {
+  const panel = document.getElementById("diagnostics-dialog");
+  if (!panel) return;
+  panel.removeAttribute("hidden");
+  await renderDiagnostics();
+}
+
+function closeDiagnostics() {
+  const panel = document.getElementById("diagnostics-dialog");
+  if (panel) panel.setAttribute("hidden", "");
+}
+
+async function renderDiagnostics() {
+  const metaContainer = document.getElementById("diagnostics-meta");
+  const logBox = document.getElementById("diagnostics-log-box");
+  if (!metaContainer || !logBox) return;
+
+  let os = "unknown";
+  let arch = "unknown";
+  if (typeof chrome !== "undefined" && chrome.runtime?.getPlatformInfo) {
+    try {
+      const info = await chrome.runtime.getPlatformInfo();
+      if (info) {
+        os = info.os || "unknown";
+        arch = info.arch || "unknown";
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const stored = await chrome.storage.local.get([
+    "totalWakeAttempts",
+    "totalWakeSuccesses",
+    "monitoringEnabled",
+    "frequencyMinutes"
+  ]);
+
+  const attempts = stored.totalWakeAttempts ?? 0;
+  const successes = stored.totalWakeSuccesses ?? 0;
+  const scaling = typeof window !== "undefined" && window.devicePixelRatio ? `${Math.round(window.devicePixelRatio * 100)}%` : "100%";
+  const online = typeof navigator !== "undefined" && navigator.onLine ? "Online" : "Offline";
+
+  metaContainer.innerHTML = `
+    <div class="diagnostics-meta-item"><span class="diagnostics-meta-label">OS:</span>${escapeHtml(os)} (${escapeHtml(arch)})</div>
+    <div class="diagnostics-meta-item"><span class="diagnostics-meta-label">DPI Scaling:</span>${escapeHtml(scaling)}</div>
+    <div class="diagnostics-meta-item"><span class="diagnostics-meta-label">Network:</span>${escapeHtml(online)}</div>
+    <div class="diagnostics-meta-item"><span class="diagnostics-meta-label">Wakes:</span>${attempts} tries / ${successes} ok</div>
+  `;
+
+  const logs = (typeof WiFiHammerDiagnostics !== "undefined")
+    ? await WiFiHammerDiagnostics.getDiagnostics()
+    : [];
+
+  if (logs.length === 0) {
+    logBox.innerHTML = '<div style="color:#666;padding:8px 0;">No events logged yet. Trigger a wake or pulse to view events.</div>';
+    return;
+  }
+
+  const entriesHtml = logs.slice().reverse().map((log) => {
+    const isError = Boolean(log.error || log.event.includes("failed"));
+    const isSuccess = log.event.includes("success");
+    const cls = isError ? "diagnostics-log-entry error" : isSuccess ? "diagnostics-log-entry success" : "diagnostics-log-entry";
+    const time = log.iso ? log.iso.split("T")[1].replace("Z", "") : new Date(log.timestamp).toLocaleTimeString();
+    let detailText = "";
+    if (log.details) {
+      try {
+        detailText = ` ${JSON.stringify(log.details)}`;
+      } catch {
+        detailText = ` ${String(log.details)}`;
+      }
+    }
+    const errText = log.error ? ` [ERROR: ${log.error}]` : "";
+    return `<div class="${cls}">[${escapeHtml(time)}] [${escapeHtml(log.source)}] <strong>${escapeHtml(log.event)}</strong>${escapeHtml(detailText)}${escapeHtml(errText)}</div>`;
+  }).join("");
+
+  logBox.innerHTML = entriesHtml;
+}
+
+async function copyDiagnostics() {
+  const copyBtn = document.getElementById("diagnostics-copy");
+  try {
+    let os = "unknown";
+    let arch = "unknown";
+    if (typeof chrome !== "undefined" && chrome.runtime?.getPlatformInfo) {
+      try {
+        const info = await chrome.runtime.getPlatformInfo();
+        if (info) {
+          os = info.os;
+          arch = info.arch;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const stored = await chrome.storage.local.get([
+      "totalWakeAttempts",
+      "totalWakeSuccesses",
+      "monitoringEnabled"
+    ]);
+
+    const systemInfo = {
+      os,
+      arch,
+      devicePixelRatio: typeof window !== "undefined" ? window.devicePixelRatio : 1,
+      onLine: typeof navigator !== "undefined" ? navigator.onLine : true,
+      totalWakeAttempts: stored.totalWakeAttempts,
+      totalWakeSuccesses: stored.totalWakeSuccesses,
+      monitoringEnabled: stored.monitoringEnabled
+    };
+
+    const logs = (typeof WiFiHammerDiagnostics !== "undefined")
+      ? await WiFiHammerDiagnostics.getDiagnostics()
+      : [];
+
+    const report = (typeof WiFiHammerDiagnostics !== "undefined")
+      ? WiFiHammerDiagnostics.formatDiagnosticsReport(logs, systemInfo)
+      : JSON.stringify({ systemInfo, logs }, null, 2);
+
+    await navigator.clipboard.writeText(report);
+    if (copyBtn) {
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = orig; }, 2000);
+    }
+  } catch (err) {
+    console.error("Failed to copy diagnostics report:", err);
+  }
+}
+
+async function clearDiagnosticsLogs() {
+  if (typeof WiFiHammerDiagnostics !== "undefined") {
+    await WiFiHammerDiagnostics.clearDiagnostics();
+  }
+  await renderDiagnostics();
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    shouldShowRatingPrompt,
+    CWS_REVIEWS_URL,
+    RATING_STATE_KEY,
+    FOURTEEN_DAYS_MS
+  };
 }

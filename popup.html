@@ -63,6 +63,17 @@
     </div>
   </header>
 
+  <!-- ── RATING BANNER ───────────────────────────────────── -->
+  <aside class="rating-banner" id="rating-banner" hidden aria-label="Rate WiFi Hammer">
+    <div class="rating-banner-top">
+      <span class="rating-banner-title">Did WiFi Hammer help? Rate it on the Chrome Web Store</span>
+      <button class="rating-banner-dismiss" id="rating-close" type="button" aria-label="Close" title="Maybe later">&times;</button>
+    </div>
+    <div class="rating-banner-actions">
+      <button class="rating-btn-rate" id="rating-rate-btn" type="button">Rate on Chrome Web Store</button>
+      <button class="rating-btn-never" id="rating-never-btn" type="button">Don't ask again</button>
+    </div>
+  </aside>
 
   <!-- ── METRIC CARDS ────────────────────────────────────── -->
   <section class="metrics-section" aria-label="Latest Wi‑Fi speed">
@@ -159,9 +170,38 @@
       <p class="disclaimer">
         This does not make your Airtel or Jio plan faster — it only wakes stuck Wi‑Fi.
       </p>
+
+      <div class="diagnostics-trigger-wrap">
+        <button class="diagnostics-link" id="open-diagnostics" type="button">Diagnostics</button>
+      </div>
     </div>
   </div>
 
+  <!-- ── DIAGNOSTICS PANEL ─────────────────────────────────── -->
+  <div class="about-panel" id="diagnostics-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="diagnostics-title">
+    <div class="dialog-inner">
+      <div class="dialog-header">
+        <span class="dialog-title" id="diagnostics-title">Diagnostics</span>
+        <button class="close-button" id="close-diagnostics" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="diagnostics-meta" id="diagnostics-meta"></div>
+
+      <div class="diagnostics-toolbar">
+        <span class="diagnostics-toolbar-title">Event Log (last 50)</span>
+        <div class="diagnostics-toolbar-btns">
+          <button class="diagnostics-btn" id="diagnostics-copy" type="button">Copy Log</button>
+          <button class="diagnostics-btn" id="diagnostics-clear" type="button">Clear</button>
+        </div>
+      </div>
+
+      <div class="diagnostics-log-box" id="diagnostics-log-box"></div>
+    </div>
+  </div>
+
+  <script src="analytics-config.js"></script>
+  <script src="analytics.js"></script>
+  <script src="diagnostics.js"></script>
   <script src="popup.js"></script>
 </body>
 

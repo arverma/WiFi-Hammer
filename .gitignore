@@ -6,3 +6,6 @@ dist/
 .env.*
 *.pem
 *.key
+
+# Real credentials — never commit this file
+analytics-config.js
