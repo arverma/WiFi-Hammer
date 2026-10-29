@@ -27,3 +27,4 @@ if (typeof self !== "undefined") {
 if (typeof globalThis !== "undefined") {
   globalThis.ANALYTICS_CONFIG = ANALYTICS_CONFIG;
 }
+
