@@ -10,8 +10,7 @@
   "host_permissions": [
     "https://fast.com/*",
     "https://*.fast.com/*",
-    "https://*.nflxvideo.net/*",
-    "https://www.google-analytics.com/*"
+    "https://*.nflxvideo.net/*"
   ],
   "background": {
     "service_worker": "background.js"

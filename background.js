@@ -571,7 +571,12 @@ async function fetchFastConfig() {
     token,
     urlCount: 5
   });
-  return fetchJson(configUrl);
+  try {
+    return await fetchJson(configUrl);
+  } catch (err) {
+    logBackgroundDiagnostic("fast_config_failed", { note: "Speed test endpoint unreachable" }, err);
+    throw new Error("Couldn't reach the speed test — check your connection.");
+  }
 }
 
 async function fetchJson(url) {
