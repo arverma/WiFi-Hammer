@@ -1,8 +1,8 @@
 {
   "name": "wifihammer",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "private": true,
-  "description": "Airtel or Jio Wi‑Fi suddenly slow? One click wakes it, no walking to the router. Auto-hammer keeps WFH calls alive.",
+  "description": "One-click wake for stuck Wi-Fi: Chrome extension (MV3).",
   "main": "background.js",
   "scripts": {
     "test": "node tests.js"

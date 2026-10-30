@@ -1,43 +1,59 @@
-# Wake Your Wi-Fi
+# WiFi Hammer
 
-Airtel and Jio WiFi gets slow, so you turn the router off and on. It works. You don't have to keep doing that. Hammer hard and leave the router on.
+A Chrome extension that wakes a stuck Wi‑Fi connection with one click, so you don't have to walk to the router and restart it. Built for sticky Airtel and Jio connections, and useful on any broadband.
 
-## The problem
+## How it works
 
-You know this move. WiFi gets stuck, you switch the router off, wait, switch it on, and the page opens. It works, but you are doing it again and again.
+Stuck Wi‑Fi is usually an idle link, not a broken router. WiFi Hammer sends real traffic through the connection to wake it up, using Fast.com's test servers.
 
-## What you get
+| | Auto wake | Hammer Hard |
+|---|---|---|
+| Trigger | Every 5 min to 6 hr (default 30 min), first run 1 min after enabling | You click it, then confirm with a second tap |
+| Traffic | One small probe: about 128 KB down, 64 KB up | A full speed test: up to 10 s down and 10 s up, up to 8 connections |
+| Data used | About 192 KB per wake | Can be a lot. On a limited plan, use it sparingly |
+| Speeds shown | Read low, which is normal for a tiny probe | Real speeds |
+| In the 24-hour chart | Yes | No |
 
-- Hammer Hard, or let it hammer every few minutes. Same wake-up, no walk to the router. New installs do this every 30 minutes. You can pause anytime.
-- A simple look at the last 24 hours: was WiFi ok, or was it lazy? You also see the last success or error, on this laptop only.
-- A real speed test when you want the actual speed. Those numbers stay off the daily chart.
+## Features
 
-The regular check is small, about 192 KB. It is not a speed test. Hammer Hard can use a lot of data. On a limited plan, that can finish your data.
+- **Hammer Hard:** one big button, with a confirm step so it can't be hit by accident. Progress shows at the top while it runs.
+- **Auto wake:** runs on a schedule you choose, and can be paused or resumed at any time. It is on by default.
+- **Last 24 hours chart:** download and upload from auto wakes, kept for 24 hours.
+- **Status line:** shows the time of the last wake (auto or Hammer Hard), or live progress while one is running. A failed wake shows its error.
+- **Why this works panel:** a short explanation, plus a Diagnostics view with a local log of recent events (last 50) for troubleshooting.
+- **Rating prompt:** after a few successful wakes, a small banner asks for a Chrome Web Store review. It can be dismissed for good.
 
 ## Install for development
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Select **Load unpacked** and choose this folder.
-4. Reload the extension after source changes.
+1. Copy `analytics-config.example.js` to `analytics-config.js`. Fill in your GA4 values, or set `MEASUREMENT_ID` and `API_SECRET` to empty strings to switch analytics off (the example's placeholders are not empty, so replace them).
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Choose **Load unpacked** and select this folder.
+4. Reload the extension after changing the source.
 
-The service worker can be inspected from the extension card. The first scheduled run is one minute after monitoring is enabled; later runs use the selected interval.
+To inspect the background worker, use the **service worker** link on the extension card. `popup.html` must be loaded as part of the extension: opening it as a `file://` page has no extension APIs.
 
-For a Chrome Web Store archive, run `make package`. That writes `dist/wifi-hammer-<version>.zip` with `manifest.json` at the archive root. The zip includes the popup, service worker, icons, hammer image, and the bundled Inter font. It leaves out tests, the Makefile, and this README.
+## Build and test
+
+```sh
+make check     # syntax checks, unit tests, manifest limits
+make package   # runs check, then writes dist/wifi-hammer-<version>.zip
+```
+
+The zip contains the popup, service worker, analytics and diagnostics scripts, icons, the hammer image and the bundled Inter font. It leaves out tests, the Makefile and this README. The checks also enforce the Web Store limits: manifest v3, name up to 45 characters, description up to 132, and all four icon sizes present.
+
+`analytics-config.js` holds real credentials and is git-ignored. Never commit it.
 
 ## Privacy and permissions
 
-Measurements and status are stored in `chrome.storage.local` and are not sent to a project server. Wake-pulse rows use `wakeHistory`; real-test rows use `realTestHistory` and are not included in the wake-pulse chart. Network traffic goes to Fast.com and the returned Netflix Open Connect edge target. WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. These events cover actions such as opening the popup, pressing Hammer Hard, turning auto wake on or off, wake success or failure, and anonymous before/after speed readings in Mbps, along with your operating system, the extension version, and a random ID generated on your device (not linked to you). Your speed history and settings stay in local storage and are never uploaded. When you uninstall, you are sent to an optional feedback form, with the extension version, operating system, days installed and wake counts added to the link. The extension needs `alarms`, `storage`, and narrowly scoped Fast.com/edge host permissions.
+**Stays on your device** (`chrome.storage.local`): your settings, the wake history behind the chart, and the diagnostics log. None of it is uploaded in bulk.
 
-Fast.com’s API is an undocumented implementation detail and may change. If it changes, the extension surfaces the failure and records no fabricated measurement.
+**Network traffic:**
+- **Fast.com and Netflix Open Connect:** the speed-test servers used for waking and measuring.
+- **Google Analytics:** WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. Events cover opening the popup, pressing Hammer Hard, turning auto wake on or off, changing the interval, wake success or failure, and the rating prompt. They include anonymous before/after speed readings in Mbps, time to recover, your operating system, the extension version, and a random ID generated on your device that isn't linked to you.
+- **Uninstall feedback:** after uninstalling, you land on an optional feedback form. The link carries the extension version, operating system, days installed and wake counts.
 
-## Validation
+**Permissions:** `alarms` for the schedule, `storage` for local data, and host access limited to `fast.com` and `nflxvideo.net`. Analytics needs no host permission.
 
-Run:
+Fast.com's API is undocumented and may change. If it does, the extension shows the failure and records nothing made up.
 
-```sh
-make check
-make package
-```
-
-The extension must still be loaded as an unpacked extension for browser-level verification; opening `popup.html` as a `file://` page does not provide Chrome extension APIs.
+This extension does not make your plan faster. It only wakes a stuck connection.
