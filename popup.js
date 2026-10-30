@@ -14,6 +14,7 @@ const CWS_REVIEWS_URL = "https://chromewebstore.google.com/detail/wifi-hammer/db
 let history = [];
 let selectedRange = "daily";
 let monitoringEnabled = true;
+let lastPulseAt = 0;
 let statusFlash = null;
 let statusFlashTimer = null;
 
@@ -235,7 +236,7 @@ async function updateFrequency(event) {
   try {
     const response = await sendMessage({ type: "setFrequency", minutes });
     if (!response?.ok) throw new Error(response?.error || "Unable to update frequency.");
-    setControlStatus(`Every ${formatFrequency(response.minutes)}`);
+    flashStatus(`Every ${formatFrequency(response.minutes)}`);
   } catch (error) {
     console.error("Unable to update frequency:", error);
     setControlStatus("Pick another time");
@@ -280,7 +281,7 @@ async function runNow() {
   if (!button.classList.contains("confirming")) {
     button.classList.add("confirming");
     if (label) label.textContent = "Confirm Hammer?";
-    setControlStatus("Tap again to wake Wi‑Fi hard");
+    setControlStatus("Tap again to confirm");
     logPopupDiagnostic("hammer_click_unconfirmed");
 
     if (confirmTimeout) clearTimeout(confirmTimeout);
@@ -366,7 +367,7 @@ function applyIdleStatus() {
   }
   const isTesting = document.getElementById("run-now").getAttribute("aria-busy") === "true";
   if (isTesting || statusFlash) return;
-  pillText.textContent = history.length > 0 ? "Ready" : "Starting…";
+  pillText.textContent = lastPulseAt ? `Last pulse · ${formatTimestamp(lastPulseAt)}` : "No pulse yet";
 }
 
 function renderControls() {
@@ -378,7 +379,9 @@ function renderControls() {
       : "M5 3.5v9l7-4.5z");
   }
   document.getElementById("toggle-label").textContent = monitoringEnabled ? "Pause" : "Resume";
-  toggle.setAttribute("aria-label", monitoringEnabled ? "Pause monitoring" : "Resume monitoring");
+  const toggleName = monitoringEnabled ? "Pause monitoring" : "Resume monitoring";
+  toggle.setAttribute("aria-label", toggleName);
+  toggle.title = toggleName;
   toggle.setAttribute("aria-pressed", String(monitoringEnabled));
   toggle.classList.toggle("active", monitoringEnabled);
   const pill = document.getElementById("status");
@@ -404,20 +407,21 @@ function renderHealth(status) {
   const health = document.getElementById("health");
   const healthText = document.getElementById("health-text");
   if (!status) {
+    lastPulseAt = 0;
     if (healthText) healthText.textContent = "";
     health.dataset.state = "";
   } else if (status.lastError) {
     if (healthText) healthText.textContent = `Last wake failed: ${status.lastError}`;
     health.dataset.state = "error";
   } else {
-    const parts = [];
     const checkAt = status.lastCheckAt || (status.mode === "probe" ? status.lastSuccessAt : null);
     const hammerAt = status.lastHammerAt || (status.mode === "full" ? status.lastSuccessAt : null);
-    if (checkAt) parts.push(`Last auto wake · ${formatTimestamp(checkAt)}`);
-    if (hammerAt) parts.push(`Last Hammer Hard · ${formatTimestamp(hammerAt)}`);
-    if (healthText) healthText.textContent = parts.join(" · ");
-    health.dataset.state = parts.length ? "ok" : "";
+    const lastPulse = Math.max(0, checkAt || 0, hammerAt || 0);
+    lastPulseAt = lastPulse;
+    if (healthText) healthText.textContent = "";
+    health.dataset.state = "";
   }
+  applyIdleStatus();
 }
 
 function formatFrequency(minutes) {
@@ -428,8 +432,25 @@ function formatTimestamp(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const NO_RECEIVER_PATTERN = /Receiving end does not exist|message port closed before a response/i;
+const SEND_RETRY_DELAYS_MS = [150, 400, 900];
+
+// The MV3 service worker can be asleep or still starting when the popup opens
+// (or after an extension update/reload). The first message wakes it, so retry
+// briefly instead of surfacing "Receiving end does not exist" to the user.
+async function sendMessageWithRetry(send, message, delays = SEND_RETRY_DELAYS_MS) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await send(message);
+    } catch (error) {
+      if (attempt >= delays.length || !NO_RECEIVER_PATTERN.test(String(error?.message || error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 function sendMessage(message) {
-  return chrome.runtime.sendMessage(message);
+  return sendMessageWithRetry((m) => chrome.runtime.sendMessage(m), message);
 }
 
 function render() {
@@ -447,9 +468,10 @@ function render() {
   document.getElementById("range-label").textContent = RANGE_LABELS[selectedRange];
   const subtitle = document.getElementById("chart-subtitle");
   if (subtitle) {
+    subtitle.title = "Auto wake downloads only ~128 KB and uploads ~64 KB, so it reads low. Hammer Hard runs a full speed test.";
     subtitle.textContent = isEmpty
       ? "Call lagging? Hit Hammer Hard — no walk to the router."
-      : "Auto wake keeps Wi‑Fi lively. Hammer Hard wakes it when stuck.";
+      : "Auto wake is a light check, so low speeds are normal.";
   }
   const ispHint = document.getElementById("isp-hint");
   if (ispHint) {
@@ -739,6 +761,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     shouldShowRatingPrompt,
     CWS_REVIEWS_URL,
+    sendMessageWithRetry,
     RATING_STATE_KEY,
     FOURTEEN_DAYS_MS
   };

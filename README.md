@@ -27,7 +27,7 @@ For a Chrome Web Store archive, run `make package`. That writes `dist/wifi-hamme
 
 ## Privacy and permissions
 
-Measurements and status are stored in `chrome.storage.local` and are not sent to a project server. Wake-pulse rows use `wakeHistory`; real-test rows use `realTestHistory` and are not included in the wake-pulse chart. Network traffic goes to Fast.com and the returned Netflix Open Connect edge target. The extension needs `alarms`, `storage`, and narrowly scoped Fast.com/edge host permissions.
+Measurements and status are stored in `chrome.storage.local` and are not sent to a project server. Wake-pulse rows use `wakeHistory`; real-test rows use `realTestHistory` and are not included in the wake-pulse chart. Network traffic goes to Fast.com and the returned Netflix Open Connect edge target. WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. These events cover actions such as opening the popup, pressing Hammer Hard, turning auto wake on or off, wake success or failure, and anonymous before/after speed readings in Mbps, along with your operating system, the extension version, and a random ID generated on your device (not linked to you). Your speed history and settings stay in local storage and are never uploaded. When you uninstall, you are sent to an optional feedback form, with the extension version, operating system, days installed and wake counts added to the link. The extension needs `alarms`, `storage`, and narrowly scoped Fast.com/edge host permissions.
 
 Fast.com’s API is an undocumented implementation detail and may change. If it changes, the extension surfaces the failure and records no fabricated measurement.
 

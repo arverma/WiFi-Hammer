@@ -91,15 +91,34 @@
          HEADER SECTION
       ═══════════════════════════════════════════════════════════ */
     .app-header {
-      padding: 20px 20px 16px;
+      padding: 16px 20px 14px;
       position: relative;
     }
 
     .header-top {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
+    }
+
+    .top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .top-row .eyebrow {
+      margin-bottom: 0;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .top-row #status-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .brand-area {
@@ -168,7 +187,9 @@
     }
 
     .tagline {
-      margin-top: 4px;
+      margin-top: 10px;
+      text-align: center;
+      white-space: nowrap;
       color: var(--text-3);
       font-size: 12px;
       font-weight: 400;
@@ -188,18 +209,35 @@
     }
 
     .about-button {
-      margin-top: 5px;
+      margin-top: 0;
+      flex-shrink: 0;
       padding: 0;
       border: 0;
       background: transparent;
-      color: var(--text-3);
+      color: var(--text-2);
       cursor: pointer;
       font: 11px 'Inter', sans-serif;
-      transition: color var(--transition);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      text-decoration-color: var(--text-3);
+      transition: color var(--transition), text-decoration-color var(--transition);
+    }
+
+    .about-button::after {
+      content: " ›";
+      text-decoration: none;
+      display: inline-block;
     }
 
     .about-button:hover {
-      color: var(--text-2);
+      color: var(--text);
+      text-decoration-color: currentColor;
+    }
+
+    .about-button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 2px;
     }
 
 
@@ -220,7 +258,7 @@
       line-height: 1.4;
     }
 
-    .health:empty {
+    .health:not([data-state="error"]) {
       display: none;
     }
 
@@ -255,61 +293,109 @@
       border-bottom: 1px solid var(--border);
     }
 
-    /* Speed Test button — lives in header */
+    /* Hammer Hard — the primary action: full width, one tap target */
     .btn-speed-test {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 11px;
-      border: 1px solid var(--upload);
-      border-radius: var(--radius-pill);
-      background: var(--upload-dim);
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 54px;
+      margin-top: 16px;
+      padding: 0 18px;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 14px;
+      background: linear-gradient(180deg, #ff2a52 0%, #ff0033 100%);
       color: #ffffff;
       cursor: pointer;
-      font: 11px/1 'Inter', sans-serif;
-      font-weight: 500;
+      font: 16px/1 'Inter', sans-serif;
+      font-weight: 600;
+      letter-spacing: -.01em;
       white-space: nowrap;
-      transition: background var(--transition), border-color var(--transition), color var(--transition), transform 80ms, box-shadow var(--transition);
-      flex-shrink: 0;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .28),
+        0 6px 20px -4px rgba(255, 0, 51, .45);
+      transition: background var(--transition), border-color var(--transition), color var(--transition), transform 120ms ease, box-shadow 160ms ease;
     }
 
+    /* Hover: lifts and brightens */
     .btn-speed-test:hover {
-      background: var(--upload);
-      color: #ffffff;
-      border-color: var(--upload);
-      box-shadow: 0 0 12px var(--upload-glow);
+      background: linear-gradient(180deg, #ff4467 0%, #ff1a45 100%);
+      border-color: rgba(255, 255, 255, .35);
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .35),
+        0 10px 28px -4px rgba(255, 0, 51, .6);
     }
 
+    /* Pressed: sinks in, glow tightens */
     .btn-speed-test:active {
-      transform: scale(.96);
+      background: linear-gradient(180deg, #e60030 0%, #cc0029 100%);
+      transform: translateY(0) scale(.985);
+      box-shadow:
+        inset 0 2px 4px rgba(0, 0, 0, .3),
+        0 2px 8px -2px rgba(255, 0, 51, .4);
     }
 
-    .btn-speed-test.confirming {
-      background: var(--upload);
-      color: #ffffff;
+    .btn-speed-test:focus-visible {
+      outline: 2px solid #ffffff;
+      outline-offset: 3px;
+    }
+
+    /* Step 2: unmistakable "tap again" state — inverted colours */
+    .btn-speed-test.confirming,
+    .btn-speed-test.confirming:hover {
+      background: #ffffff;
       border-color: #ffffff;
-      box-shadow: 0 0 16px var(--upload-glow);
+      color: var(--upload);
+      transform: none;
+      box-shadow: 0 0 0 4px rgba(255, 0, 51, .35), 0 8px 24px -4px rgba(255, 255, 255, .3);
       animation: pulse-confirm 1s ease-in-out infinite;
+    }
+
+    .btn-speed-test.confirming img {
+      filter: none;
     }
 
     @keyframes pulse-confirm {
       0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.03); }
+      50% { transform: scale(1.015); }
     }
 
+    /* Working: stays readable (no washed-out fade), hammer swings */
     .btn-speed-test[aria-busy="true"] {
-      opacity: .5;
-      cursor: wait;
+      background: rgba(255, 0, 51, .16);
+      border-color: rgba(255, 0, 51, .5);
+      transform: none;
+      box-shadow: none;
+      cursor: progress;
       pointer-events: none;
+    }
+
+    .btn-speed-test[aria-busy="true"] img {
+      transform-origin: 85% 85%;
+      animation: hammer-swing .5s ease-in-out infinite alternate;
+    }
+
+    @keyframes hammer-swing {
+      from { transform: rotate(-25deg); }
+      to { transform: rotate(20deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .btn-speed-test.confirming,
+      .btn-speed-test[aria-busy="true"] img {
+        animation: none;
+      }
     }
 
     .btn-speed-test svg,
     .btn-speed-test img {
-      width: 14px;
-      height: 14px;
+      width: 20px;
+      height: 20px;
       flex-shrink: 0;
     }
-    
+
     .btn-speed-test img {
       filter: invert(1);
     }
@@ -317,8 +403,10 @@
     /* Header actions row (speed test + status pill) */
     .header-actions {
       display: flex;
-      align-items: center;
-      gap: 8px;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+      align-self: flex-start;
       flex-shrink: 0;
     }
 
@@ -374,7 +462,7 @@
       align-items: center;
       justify-content: center;
       gap: 6px;
-      min-width: 80px;
+      min-width: 34px;
       padding: 0 10px;
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-sm) 0 0 var(--radius-sm);
@@ -409,6 +497,16 @@
       pointer-events: none;
     }
 
+    /* Icon-only: label stays in the DOM for screen readers and JS */
+    .btn-pause #toggle-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
     .btn-pause svg {
       width: 11px;
       height: 11px;
@@ -421,6 +519,7 @@
       display: flex;
       align-items: stretch;
       margin-left: auto;
+      flex-shrink: 0;
     }
 
     .interval-wrap {
@@ -611,9 +710,9 @@
 
     .chart-header {
       display: flex;
-      align-items: baseline;
+      align-items: center;
+      margin-bottom: 8px;
       justify-content: space-between;
-      margin-bottom: 3px;
     }
 
     .chart-title {
@@ -624,6 +723,7 @@
     }
 
     .chart-range {
+      margin-left: 4px;
       font-size: 11px;
       font-weight: 400;
       color: var(--text-3);

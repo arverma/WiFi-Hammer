@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "WiFi Hammer: Wake slow Airtel and Jio Wi‑Fi",
-  "description": "Airtel or Jio Wi‑Fi suddenly slow? One click wakes it — no walking to the router. Auto-hammer keeps WFH calls alive.",
+  "name": "WiFi Hammer: Fix Airtel/Jio No-Internet Wi-Fi",
+  "description": "Wi-Fi connected but no internet? One click wakes a stuck connection on Airtel, Jio, JioFiber or any broadband. Keeps calls alive.",
   "version": "1.0.5",
   "permissions": [
     "alarms",

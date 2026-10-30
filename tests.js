@@ -110,6 +110,15 @@ if (clampedUrl.length > 1023) throw new Error("Failed to clamp long URL under 10
 
 const popup = require("./popup.js");
 const DAY_MS = 86_400_000;
+(async () => {
+  let calls = 0;
+  const flaky = async () => { calls += 1; if (calls < 3) throw new Error("Could not establish connection. Receiving end does not exist."); return { ok: true }; };
+  const res = await popup.sendMessageWithRetry(flaky, {}, [1, 1, 1]);
+  if (!res.ok || calls !== 3) throw new Error("sendMessageWithRetry did not retry a sleeping service worker");
+  let other = 0;
+  try { await popup.sendMessageWithRetry(async () => { other += 1; throw new Error("boom"); }, {}, [1, 1]); } catch {}
+  if (other !== 1) throw new Error("sendMessageWithRetry retried a non-connection error");
+})().catch((e) => { console.error(e); process.exitCode = 1; });
 const testNow = 1_000_000_000_000;
 
 if (popup.shouldShowRatingPrompt({ successes: 0, dismissedForever: false, lastPromptedAt: null, now: testNow })) {

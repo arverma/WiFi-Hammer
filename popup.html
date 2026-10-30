@@ -12,54 +12,30 @@
 
   <!-- ── HEADER ─────────────────────────────────────────── -->
   <header class="app-header">
+    <div class="top-row">
+      <p class="eyebrow" id="status" data-state="empty" aria-label="No measurements yet">
+        <span class="eyebrow-dot"></span>
+        <span id="status-text">Status</span>
+      </p>
+      <button class="about-button" id="about-button" type="button">Why this works</button>
+    </div>
+
     <div class="header-top">
       <div class="brand-area">
-        <p class="eyebrow" id="status" data-state="empty" aria-label="No measurements yet">
-          <span class="eyebrow-dot"></span>
-          <span id="status-text">Status</span>
-        </p>
         <h1>WiFi Hammer</h1>
-        <p class="tagline">Wake stuck Wi‑Fi without walking to the router.</p>
-        <p class="isp-hint" id="isp-hint">Made for sticky Airtel and Jio Wi‑Fi.</p>
-        <button class="about-button" id="about-button" type="button">Why this works</button>
-      </div>
-
-      <div class="header-actions">
-        <button class="btn-speed-test" id="run-now" type="button" aria-label="Hammer Hard — wake stuck Wi‑Fi"
-          title="Hammer Hard — wake stuck Wi‑Fi">
-          <img src="images/hammer.png" alt="Hammer">
-          <span id="run-now-label">Hammer Hard</span>
-        </button>
-
+        <p class="isp-hint" id="isp-hint">Built for Airtel &amp; Jio.</p>
       </div>
     </div>
 
+    <button class="btn-speed-test" id="run-now" type="button"
+      title="Hammer Hard — wake stuck Wi‑Fi">
+      <img src="images/hammer.png" alt="">
+      <span id="run-now-label">Hammer Hard</span>
+    </button>
+    <p class="tagline">Wake stuck Wi‑Fi without walking to the router.</p>
+
     <div class="health" id="health" role="status" data-state="">
       <span id="health-text"></span>
-      <div class="schedule-group">
-        <button class="btn-pause" id="toggle-monitoring" type="button" aria-pressed="true"
-          aria-label="Pause monitoring">
-          <svg id="toggle-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <path d="M4 3h2v10H4zM10 3h2v10h-2z" />
-          </svg>
-          <span id="toggle-label">Pause</span>
-        </button>
-        <div class="interval-wrap">
-          <span class="interval-label">Every</span>
-          <select class="frequency-select" id="frequency" aria-label="Automatic wake interval">
-            <option value="5">5 min</option>
-            <option value="10">10 min</option>
-            <option value="15">15 min</option>
-            <option value="30" selected>30 min</option>
-            <option value="60">1 hr</option>
-            <option value="120">2 hr</option>
-            <option value="180">3 hr</option>
-            <option value="240">4 hr</option>
-            <option value="300">5 hr</option>
-            <option value="360">6 hr</option>
-          </select>
-        </div>
-      </div>
     </div>
   </header>
 
@@ -98,10 +74,33 @@
   <!-- ── CHART ───────────────────────────────────────────── -->
   <section class="chart-section">
     <div class="chart-header">
-      <span class="chart-title">Today</span>
-      <span class="chart-range" id="range-label">Last 24 hours</span>
+      <span class="chart-title" id="range-label">Last 24 hours</span>
+      <div class="schedule-group">
+        <button class="btn-pause" id="toggle-monitoring" type="button" aria-pressed="true"
+          aria-label="Pause monitoring">
+          <svg id="toggle-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M4 3h2v10H4zM10 3h2v10h-2z" />
+          </svg>
+          <span id="toggle-label">Pause</span>
+        </button>
+        <div class="interval-wrap">
+          <span class="interval-label">Every</span>
+          <select class="frequency-select" id="frequency" aria-label="Automatic wake interval">
+            <option value="5">5 min</option>
+            <option value="10">10 min</option>
+            <option value="15">15 min</option>
+            <option value="30" selected>30 min</option>
+            <option value="60">1 hr</option>
+            <option value="120">2 hr</option>
+            <option value="180">3 hr</option>
+            <option value="240">4 hr</option>
+            <option value="300">5 hr</option>
+            <option value="360">6 hr</option>
+          </select>
+        </div>
+      </div>
     </div>
-    <p class="chart-subtitle" id="chart-subtitle">Auto wake keeps Wi‑Fi lively. Hammer Hard wakes it when stuck.</p>
+    <p class="chart-subtitle" id="chart-subtitle">Auto wake is a light check, so low speeds are normal.</p>
 
     <div class="chart-wrap">
       <svg id="chart" viewBox="0 0 340 132" role="img" aria-label="Wi‑Fi speed over the last 24 hours"></svg>
@@ -153,6 +152,17 @@
           <p class="fact-title">See the last 24 hours</p>
           <p class="fact-desc">The chart shows auto wakes. Hammer Hard wakes harder when stuck and can use more
             data.</p>
+        </div>
+      </div>
+
+      <p class="dialog-eyebrow" style="margin-top:16px">About the speeds</p>
+
+      <div class="fact-card">
+        <span class="fact-icon">&#128207;</span>
+        <div class="fact-body">
+          <p class="fact-title">Auto wake is a light check, so low speeds are normal</p>
+          <p class="fact-desc">It moves only a tiny amount of data (about 128 KB down, 64 KB up) just to wake
+            Wi‑Fi, so the numbers read low. Hammer Hard runs a full speed test for real numbers.</p>
         </div>
       </div>
 
