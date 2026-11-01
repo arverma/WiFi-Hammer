@@ -48,13 +48,10 @@ function logBackgroundDiagnostic(event, details = null, error = null) {
 
 function categorizeWakeError(error) {
   const msg = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
-  if (msg.includes("already running")) return "already_running";
-  if (msg.includes("reach the network") || msg.includes("offline")) return "offline";
+  if (msg.includes("reach the network") || msg.includes("offline")) return "no_network";
   if (msg.includes("abort") || msg.includes("timeout") || msg.includes("timed out")) return "timeout";
-  if (msg.includes("probe") || msg.includes("network wake-up failed")) return "probe_failed";
-  if (msg.includes("could not wake")) return "invalid_speed";
-  if (msg.includes("failed to fetch") || msg.includes("networkerror")) return "network_error";
-  return "wake_failed";
+  if (msg.includes("speed test") || msg.includes("fast.com")) return "speedtest_unreachable";
+  return "other";
 }
 
 function getUninstallConfigUrl() {
@@ -275,6 +272,10 @@ async function setFrequency(value) {
 async function runSpeedNudge({ fullTest = false } = {}) {
   if (measurementInFlight) {
     logBackgroundDiagnostic("wake_aborted", { reason: "already_running" });
+    sendAnalyticsEvent("wake_failure", {
+      trigger: fullTest ? "manual" : "auto",
+      error_type: "other"
+    });
     throw new Error("A wake-up is already running.");
   }
   measurementInFlight = true;
@@ -288,7 +289,7 @@ async function runSpeedNudge({ fullTest = false } = {}) {
     }
 
     await incrementWakeCounter(WAKE_SUCCESSES_KEY);
-    void syncUninstallURL();
+    await syncUninstallURL();
 
     const now = Date.now();
     const historyKey = fullTest ? REAL_TEST_HISTORY_KEY : WAKE_HISTORY_KEY;
@@ -341,7 +342,7 @@ async function runSpeedNudge({ fullTest = false } = {}) {
       errorType,
       timeToFailMs
     }, error);
-    sendAnalyticsEvent("wake_failed", {
+    sendAnalyticsEvent("wake_failure", {
       trigger: fullTest ? "manual" : "auto",
       error_type: errorType,
       time_to_fail_ms: timeToFailMs
@@ -358,7 +359,7 @@ async function runSpeedNudge({ fullTest = false } = {}) {
         lastError: error instanceof Error ? error.message : "Wake-up failed."
       }
     });
-    void syncUninstallURL();
+    await syncUninstallURL();
     throw error;
   } finally {
     measurementInFlight = false;

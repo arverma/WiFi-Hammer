@@ -10,10 +10,13 @@ const context = {
       onMessage: { addListener() {} },
       setUninstallURL: async () => {},
       getPlatformInfo: async () => ({ os: "mac" }),
-      getManifest: () => ({ version: "1.0.5" })
+      getManifest: () => ({ version: "1.0.6" })
     },
     alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener() {} } },
-    storage: { local: { get: async () => ({}), set: async () => {} } }
+    storage: {
+      local: { get: async () => ({}), set: async () => {} },
+      session: { get: async () => ({}), set: async () => {} }
+    }
   },
   console,
   setTimeout,
@@ -42,28 +45,38 @@ if (context.testHistoryKeys.wake !== "wakeHistory" || context.testHistoryKeys.re
   throw new Error("History keys are not separated");
 }
 
-if (context.testCategorizeWakeError(new Error("A wake-up is already running.")) !== "already_running") {
-  throw new Error("Error categorization failed for already_running");
+if (context.testCategorizeWakeError(new Error("A wake-up is already running.")) !== "other") {
+  throw new Error("Error categorization failed for other");
 }
-if (context.testCategorizeWakeError(new Error("Could not reach the network.")) !== "offline") {
-  throw new Error("Error categorization failed for offline");
+if (context.testCategorizeWakeError(new Error("Could not reach the network.")) !== "no_network") {
+  throw new Error("Error categorization failed for no_network");
 }
-if (context.testCategorizeWakeError(new Error("Network wake-up failed.")) !== "probe_failed") {
-  throw new Error("Error categorization failed for probe_failed");
+if (context.testCategorizeWakeError(new Error("Couldn't reach the speed test — check your connection.")) !== "speedtest_unreachable") {
+  throw new Error("Error categorization failed for speedtest_unreachable");
 }
 if (context.testCategorizeWakeError(new Error("The operation timed out")) !== "timeout") {
   throw new Error("Error categorization failed for timeout");
 }
-if (context.testCategorizeWakeError(new Error("Could not wake Wi‑Fi this time.")) !== "invalid_speed") {
-  throw new Error("Error categorization failed for invalid_speed");
+if (context.testCategorizeWakeError(new Error("Could not wake Wi‑Fi this time.")) !== "other") {
+  throw new Error("Error categorization failed for other");
 }
 
 const analytics = require("./analytics.js");
+if (analytics.EVENT_PARAMS_DEFAULTS.engagement_time_msec !== 100) {
+  throw new Error("Analytics engagement default is not 100ms");
+}
 if (!analytics.isUrlOrIp("https://fast.com/app.js") || !analytics.isUrlOrIp("http://192.168.1.1/test") || !analytics.isUrlOrIp("10.0.0.1")) {
   throw new Error("isUrlOrIp failed to flag URLs or IPs");
 }
 if (analytics.isUrlOrIp("manual") || analytics.isUrlOrIp("timeout") || analytics.isUrlOrIp("1.0.5")) {
   throw new Error("isUrlOrIp falsely flagged valid event params");
+}
+if (JSON.parse(fs.readFileSync("manifest.json", "utf8")).version !== "1.0.6") {
+  throw new Error("Manifest version is not 1.0.6");
+}
+const popupCss = fs.readFileSync("popup.css", "utf8");
+if (!popupCss.includes("body.hammering:not(:hover)") || !popupCss.includes("body.hammering:not(:hover) .btn-speed-test[aria-busy=\"true\"] img")) {
+  throw new Error("Hammering animation is not gated by popup hover state");
 }
 
 const sanitized = analytics.sanitizeParams({
@@ -80,14 +93,14 @@ if (sanitized.trigger !== "manual" || sanitized.leak_url || sanitized.leak_ip ||
 
 const testUninstallUrl = context.testBuildUninstallURL({
   baseUrl: "https://forms.gle/eXVFdDdEfMxhKnqp6",
-  version: "1.0.5",
+  version: "1.0.6",
   os: "mac",
   daysInstalled: 3,
   attempts: 15,
   successes: 12
 });
 const parsedUninstallUrl = new URL(testUninstallUrl);
-if (parsedUninstallUrl.searchParams.get("v") !== "1.0.5") throw new Error("Uninstall URL version param mismatch");
+if (parsedUninstallUrl.searchParams.get("v") !== "1.0.6") throw new Error("Uninstall URL version param mismatch");
 if (parsedUninstallUrl.searchParams.get("os") !== "mac") throw new Error("Uninstall URL os param mismatch");
 if (parsedUninstallUrl.searchParams.get("days") !== "3") throw new Error("Uninstall URL days param mismatch");
 if (parsedUninstallUrl.searchParams.get("attempts") !== "15") throw new Error("Uninstall URL attempts param mismatch");
@@ -191,6 +204,10 @@ async function assertAnalyticsStorageAndSend() {
         local: {
           get: async (key) => ({ [key]: store[key] }),
           set: async (items) => Object.assign(store, items)
+        },
+        session: {
+          get: async (key) => ({ [key]: store[key] }),
+          set: async (items) => Object.assign(store, items)
         }
       },
       runtime: {
@@ -237,8 +254,10 @@ async function assertAnalyticsStorageAndSend() {
   mockContext.ANALYTICS_CONFIG.API_SECRET = "valid_secret";
   let capturedPayload = null;
   let capturedUrl = null;
+  let capturedOptions = null;
   mockContext.fetch = async (url, opts) => {
     capturedUrl = url;
+    capturedOptions = opts;
     capturedPayload = JSON.parse(opts.body);
     return { ok: true, status: 204 };
   };
@@ -250,14 +269,21 @@ async function assertAnalyticsStorageAndSend() {
   if (!capturedUrl.includes("measurement_id=G-TEST12345") || !capturedUrl.includes("api_secret=valid_secret")) {
     throw new Error("URL query parameters missing measurement_id or api_secret");
   }
+  if (capturedOptions.mode !== "no-cors") throw new Error("Analytics fetch mode changed from no-cors");
   if (!capturedPayload || capturedPayload.client_id !== "test-uuid-1234") {
     throw new Error("Payload missing client_id");
   }
   const event = capturedPayload.events[0];
   if (event.name !== "hammer_clicked") throw new Error("Event name mismatch");
   if (event.params.os !== "mac") throw new Error("OS was not attached to event params");
+  if (!Number.isFinite(event.params.session_id)) throw new Error("Session ID was not attached to event params");
+  if (event.params.engagement_time_msec !== 100) throw new Error("Default engagement time was not attached to event params");
   if (event.params.trigger !== "manual") throw new Error("Event param trigger mismatch");
   if (event.params.forbidden_url !== undefined) throw new Error("Forbidden URL was not stripped from event params");
+  if (!store.ga_session || store.ga_session.id !== event.params.session_id) {
+    throw new Error("Session ID was not stored in chrome.storage.session");
+  }
+  if (mockContext.fetch === undefined || !capturedPayload) throw new Error("Analytics request was not captured");
 }
 
 async function assertUninstallURLSync() {
@@ -284,7 +310,7 @@ async function assertUninstallURLSync() {
         onMessage: { addListener() {} },
         setUninstallURL: async (u) => { setUninstallURLCalledWith = u; },
         getPlatformInfo: async () => ({ os: "mac" }),
-        getManifest: () => ({ version: "1.0.5" })
+        getManifest: () => ({ version: "1.0.6" })
       },
       alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener() {} } }
     },
@@ -312,7 +338,7 @@ async function assertUninstallURLSync() {
     throw new Error("setUninstallURL was not called with the configured URL");
   }
   const u1 = new URL(setUninstallURLCalledWith);
-  if (u1.searchParams.get("v") !== "1.0.5") throw new Error("Version mismatch in setUninstallURL");
+  if (u1.searchParams.get("v") !== "1.0.6") throw new Error("Version mismatch in setUninstallURL");
   if (u1.searchParams.get("attempts") !== "0") throw new Error("Initial attempts should be 0");
   if (u1.searchParams.get("successes") !== "0") throw new Error("Initial successes should be 0");
 

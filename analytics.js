@@ -1,9 +1,16 @@
 (function () {
   const GA_ENDPOINT = "https://www.google-analytics.com/mp/collect";
   const CLIENT_ID_KEY = "ga_client_id";
+  const SESSION_KEY = "ga_session";
+  const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+  const EVENT_PARAMS_DEFAULTS = {
+    engagement_time_msec: 100
+  };
 
   let cachedClientId = null;
   let cachedOS = null;
+  let cachedSession = null;
+  let sessionPromise = null;
 
   function getConfig() {
     if (typeof self !== "undefined" && self.ANALYTICS_CONFIG) {
@@ -55,6 +62,56 @@
       // Ignore errors when querying platform info
     }
     return "unknown";
+  }
+
+  async function getSession() {
+    const now = Date.now();
+    if (cachedSession && now - cachedSession.lastEventAt < SESSION_TIMEOUT_MS) {
+      cachedSession.lastEventAt = now;
+      try {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+          await chrome.storage.session.set({ [SESSION_KEY]: cachedSession });
+        }
+      } catch {
+        // Keep the in-memory session if session storage is unavailable.
+      }
+      return cachedSession;
+    }
+    if (sessionPromise) return sessionPromise;
+
+    sessionPromise = (async () => {
+      let stored = {};
+      try {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+          stored = await chrome.storage.session.get(SESSION_KEY);
+        }
+      } catch {
+        stored = {};
+      }
+
+      const previous = stored?.[SESSION_KEY];
+      const session = previous
+        && Number.isFinite(previous.id)
+        && Number.isFinite(previous.lastEventAt)
+        && now - previous.lastEventAt < SESSION_TIMEOUT_MS
+        ? { id: previous.id, lastEventAt: now }
+        : { id: now, lastEventAt: now };
+      cachedSession = session;
+      try {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+          await chrome.storage.session.set({ [SESSION_KEY]: session });
+        }
+      } catch {
+        // Keep the in-memory session if session storage is unavailable.
+      }
+      return session;
+    })();
+
+    try {
+      return await sessionPromise;
+    } finally {
+      sessionPromise = null;
+    }
   }
 
   function isUrlOrIp(value) {
@@ -119,12 +176,19 @@
       if (!clientId) return false;
 
       const os = await getPlatformOS();
+      const session = await getSession();
 
       // 4. Assemble payload with strict privacy guarantees
       const eventParams = {
         os,
+        session_id: session.id,
+        ...EVENT_PARAMS_DEFAULTS,
         ...sanitizeParams(params)
       };
+      eventParams.session_id = session.id;
+      eventParams.engagement_time_msec = Number.isFinite(params.engagement_time_msec)
+        ? params.engagement_time_msec
+        : EVENT_PARAMS_DEFAULTS.engagement_time_msec;
 
       const url = `${GA_ENDPOINT}?measurement_id=${encodeURIComponent(measurementId)}&api_secret=${encodeURIComponent(apiSecret)}`;
       const payload = {
@@ -155,6 +219,8 @@
     trackEvent,
     getClientId,
     getPlatformOS,
+    getSession,
+    EVENT_PARAMS_DEFAULTS,
     sanitizeParam,
     sanitizeParams,
     isUrlOrIp
@@ -172,4 +238,3 @@
     module.exports = api;
   }
 })();
-
