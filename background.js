@@ -155,9 +155,11 @@ async function syncUninstallURL() {
   }
 }
 
-chrome.runtime.onInstalled.addListener((details) => {
+function handleInstalled(details) {
   void ensureAlarm();
   void syncUninstallURL();
+  if (details?.reason !== "install") return;
+
   const manifest = (typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.getManifest === "function")
     ? chrome.runtime.getManifest()
     : { version: "unknown" };
@@ -166,7 +168,9 @@ chrome.runtime.onInstalled.addListener((details) => {
     version: manifest?.version || "unknown",
     previous_version: details?.previousVersion || ""
   });
-});
+}
+
+chrome.runtime.onInstalled.addListener(handleInstalled);
 
 chrome.runtime.onStartup.addListener(() => {
   void ensureAlarm();
@@ -337,7 +341,7 @@ async function runSpeedNudge({ fullTest = false } = {}) {
   } catch (error) {
     const timeToFailMs = Math.max(0, Date.now() - startedAt);
     const errorType = categorizeWakeError(error);
-    logBackgroundDiagnostic("wake_failed", {
+    logBackgroundDiagnostic("wake_failure", {
       mode: fullTest ? "manual" : "auto",
       errorType,
       timeToFailMs

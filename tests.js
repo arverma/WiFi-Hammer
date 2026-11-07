@@ -2,6 +2,8 @@ const fs = require("fs");
 const vm = require("vm");
 
 const source = fs.readFileSync("background.js", "utf8");
+if (source.includes('"wake_failed"')) throw new Error("wake_failed typo is still present");
+const installationEvents = [];
 const context = {
   chrome: {
     runtime: {
@@ -10,6 +12,7 @@ const context = {
       onMessage: { addListener() {} },
       setUninstallURL: async () => {},
       getPlatformInfo: async () => ({ os: "mac" }),
+      getBrowserInfo: async () => ({ browser: "Chrome", version: "131.0.6778.86" }),
       getManifest: () => ({ version: "1.0.6" })
     },
     alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener() {} } },
@@ -24,9 +27,16 @@ const context = {
   URL,
   URLSearchParams,
   AbortController,
-  performance
+  performance,
+  trackEvent: (name, params) => installationEvents.push({ name, params })
 };
-vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
+vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
+
+context.testHandleInstalled({ reason: "install" });
+context.testHandleInstalled({ reason: "update", previousVersion: "1.0.5" });
+if (installationEvents.length !== 1 || installationEvents[0].name !== "extension_installed") {
+  throw new Error("extension_installed was not limited to fresh installs");
+}
 
 const now = 1_000_000_000;
 const retained = context.testPrune([
@@ -211,7 +221,8 @@ async function assertAnalyticsStorageAndSend() {
         }
       },
       runtime: {
-        getPlatformInfo: async () => ({ os: "mac" })
+        getPlatformInfo: async () => ({ os: "mac" }),
+        getBrowserInfo: async () => ({ browser: "Chrome", version: "131.0.6778.86" })
       }
     },
     crypto: {
@@ -239,6 +250,8 @@ async function assertAnalyticsStorageAndSend() {
 
   const os = await mockContext.WiFiHammerAnalytics.getPlatformOS();
   if (os !== "mac") throw new Error("getPlatformOS failed");
+  const chromeVersion = await mockContext.WiFiHammerAnalytics.getChromeVersion();
+  if (chromeVersion !== "131.0.6778.86") throw new Error("getChromeVersion failed");
 
   mockContext.navigator.onLine = false;
   let fetchCalled = false;
@@ -276,6 +289,7 @@ async function assertAnalyticsStorageAndSend() {
   const event = capturedPayload.events[0];
   if (event.name !== "hammer_clicked") throw new Error("Event name mismatch");
   if (event.params.os !== "mac") throw new Error("OS was not attached to event params");
+  if (event.params.chrome_version !== "131.0.6778.86") throw new Error("Chrome version was not attached to event params");
   if (!Number.isFinite(event.params.session_id)) throw new Error("Session ID was not attached to event params");
   if (event.params.engagement_time_msec !== 100) throw new Error("Default engagement time was not attached to event params");
   if (event.params.trigger !== "manual") throw new Error("Event param trigger mismatch");

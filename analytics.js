@@ -9,6 +9,7 @@
 
   let cachedClientId = null;
   let cachedOS = null;
+  let cachedChromeVersion = null;
   let cachedSession = null;
   let sessionPromise = null;
 
@@ -62,6 +63,30 @@
       // Ignore errors when querying platform info
     }
     return "unknown";
+  }
+
+  async function getChromeVersion() {
+    if (cachedChromeVersion) return cachedChromeVersion;
+    if (typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.getBrowserInfo === "function") {
+      try {
+        const info = await chrome.runtime.getBrowserInfo();
+        if (typeof info?.version === "string" && info.version) {
+          cachedChromeVersion = info.version;
+          return cachedChromeVersion;
+        }
+      } catch {
+        // Fall back to the user agent when the browser info API is unavailable.
+      }
+    }
+
+    try {
+      const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const match = userAgent.match(/Chrome\/([\d.]+)/);
+      cachedChromeVersion = match?.[1] || "unknown";
+      return cachedChromeVersion;
+    } catch {
+      return "unknown";
+    }
   }
 
   async function getSession() {
@@ -142,7 +167,7 @@
   function sanitizeParams(rawParams = {}) {
     const clean = {};
     for (const [key, val] of Object.entries(rawParams)) {
-      if (key === "os" || key === "client_id") continue;
+      if (key === "os" || key === "chrome_version" || key === "client_id") continue;
       const sanitized = sanitizeParam(val);
       if (sanitized !== null) {
         clean[key] = sanitized;
@@ -171,16 +196,18 @@
         return false;
       }
 
-      // 3. Resolve client_id and platform OS
+      // 3. Resolve client_id, platform OS, and Chrome version
       const clientId = await getClientId();
       if (!clientId) return false;
 
       const os = await getPlatformOS();
+      const chromeVersion = await getChromeVersion();
       const session = await getSession();
 
       // 4. Assemble payload with strict privacy guarantees
       const eventParams = {
         os,
+        chrome_version: chromeVersion,
         session_id: session.id,
         ...EVENT_PARAMS_DEFAULTS,
         ...sanitizeParams(params)
@@ -219,6 +246,7 @@
     trackEvent,
     getClientId,
     getPlatformOS,
+    getChromeVersion,
     getSession,
     EVENT_PARAMS_DEFAULTS,
     sanitizeParam,
