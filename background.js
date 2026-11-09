@@ -4,6 +4,7 @@ const REAL_TEST_HISTORY_KEY = "realTestHistory";
 const MONITORING_KEY = "monitoringEnabled";
 const FREQUENCY_KEY = "frequencyMinutes";
 const STATUS_KEY = "monitorStatus";
+const PROBE_FAILURES_KEY = "watchdogConsecutiveFailures";
 const INSTALL_DATE_KEY = "installedAt";
 const WAKE_ATTEMPTS_KEY = "totalWakeAttempts";
 const WAKE_SUCCESSES_KEY = "totalWakeSuccesses";
@@ -12,10 +13,14 @@ const DEFAULT_FREQUENCY_MINUTES = 30;
 const MIN_FREQUENCY_MINUTES = 5;
 const MAX_FREQUENCY_MINUTES = 360;
 const FAST_HOME_URL = "https://fast.com/";
+const PROBE_URL = "https://fast.com/favicon.ico";
 const CONFIG_ENDPOINT = "https://api.fast.com/netflix/speedtest/v2";
 const FAST_FALLBACK_TOKEN = "YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm";
 const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours — rolling window
 const REQUEST_TIMEOUT_MS = 10_000;
+const PROBE_TIMEOUT_MS = 5_000;
+const PROBE_RTT_THRESHOLD_MS = 3_000;
+const PROBE_FAILURE_THRESHOLD = 2;
 const MIN_CONNECTIONS = 1;
 const MAX_CONNECTIONS = 8;
 const MIN_TEST_SECONDS = 5;
@@ -211,15 +216,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
-    void getMonitoringState().then((state) => {
-      if (state.enabled) {
-        logBackgroundDiagnostic("alarm_pulse", { minutes: state.minutes });
-        sendAnalyticsEvent("auto_hammer_pulse", {
-          frequency_minutes: state.minutes
-        });
-        return runSpeedNudge({ fullTest: false });
-      }
-    }).catch((error) => {
+    void runWatchdogCycle().catch((error) => {
       logBackgroundDiagnostic("alarm_handler_error", null, error);
       console.warn("WiFi Hammer alarm handler failed:", error);
     });
@@ -244,6 +241,7 @@ async function setMonitoring(enabled) {
     });
   } else {
     await chrome.alarms.clear(ALARM_NAME);
+    await chrome.storage.local.set({ [PROBE_FAILURES_KEY]: 0 });
   }
 }
 
@@ -273,18 +271,98 @@ async function setFrequency(value) {
   return minutes;
 }
 
-async function runSpeedNudge({ fullTest = false } = {}) {
+function shouldTriggerWatchdogHammer({ healthy, consecutiveFailures }) {
+  return !healthy && consecutiveFailures >= PROBE_FAILURE_THRESHOLD;
+}
+
+async function probeNetwork() {
+  const startedAt = performance.now();
+  try {
+    const response = await fetchWithTimeout(PROBE_URL, {
+      cache: "no-store",
+      credentials: "omit"
+    }, PROBE_TIMEOUT_MS);
+    const rttMs = Math.round(performance.now() - startedAt);
+    const responseUrl = new URL(response.url || PROBE_URL);
+    const isFastHost = responseUrl.hostname === "fast.com" || responseUrl.hostname.endsWith(".fast.com");
+    if (!isFastHost) {
+      throw new Error("Network probe was redirected.");
+    }
+    await response.body?.cancel?.();
+    return { healthy: rttMs <= PROBE_RTT_THRESHOLD_MS, rttMs };
+  } catch (error) {
+    return {
+      healthy: false,
+      rttMs: Math.round(performance.now() - startedAt),
+      errorType: categorizeWakeError(error)
+    };
+  }
+}
+
+async function runWatchdogCycle() {
+  const state = await getMonitoringState();
+  if (!state.enabled) return;
+
+  const probe = await probeNetwork();
+  const stored = await chrome.storage.local.get([PROBE_FAILURES_KEY, STATUS_KEY]);
+  const previousFailures = Number.isFinite(stored[PROBE_FAILURES_KEY]) ? stored[PROBE_FAILURES_KEY] : 0;
+  const consecutiveFailures = probe.healthy ? 0 : previousFailures + 1;
+  const now = Date.now();
+  const previousStatus = stored[STATUS_KEY] || {};
+  await chrome.storage.local.set({
+    [PROBE_FAILURES_KEY]: consecutiveFailures,
+    [STATUS_KEY]: {
+      ...previousStatus,
+      lastCheckAt: now,
+      lastProbeAt: now,
+      lastProbeResult: probe.healthy ? "ok" : "fail",
+      lastProbeRttMs: probe.rttMs
+    }
+  });
+
+  const probeParams = {
+    result: probe.healthy ? "ok" : "fail",
+    failure_count: consecutiveFailures,
+    threshold_ms: PROBE_RTT_THRESHOLD_MS,
+    interval_minutes: state.minutes
+  };
+  if (Number.isFinite(probe.rttMs)) probeParams.rtt_ms = probe.rttMs;
+  if (probe.errorType) probeParams.error_type = probe.errorType;
+  logBackgroundDiagnostic("network_probe", probeParams);
+  sendAnalyticsEvent("network_probe", probeParams);
+
+  if (!shouldTriggerWatchdogHammer({ healthy: probe.healthy, consecutiveFailures })) return;
+
+  const triggerParams = {
+    reason: "consecutive_probe_failures",
+    consecutive_failures: consecutiveFailures,
+    threshold_ms: PROBE_RTT_THRESHOLD_MS,
+    interval_minutes: state.minutes
+  };
+  if (Number.isFinite(probe.rttMs)) triggerParams.rtt_ms = probe.rttMs;
+  sendAnalyticsEvent("auto_hammer_triggered", triggerParams);
+  sendAnalyticsEvent("auto_hammer_pulse", {
+    mode: "watchdog",
+    reason: "consecutive_probe_failures",
+    consecutive_failures: consecutiveFailures
+  });
+  await chrome.storage.local.set({ [PROBE_FAILURES_KEY]: 0 });
+  await runSpeedNudge({ fullTest: true, trigger: "watchdog" });
+}
+
+async function runSpeedNudge({ fullTest = false, trigger } = {}) {
+  const wakeTrigger = trigger || (fullTest ? "manual" : "auto");
   if (measurementInFlight) {
     logBackgroundDiagnostic("wake_aborted", { reason: "already_running" });
     sendAnalyticsEvent("wake_failure", {
-      trigger: fullTest ? "manual" : "auto",
+      trigger: wakeTrigger,
       error_type: "other"
     });
     throw new Error("A wake-up is already running.");
   }
   measurementInFlight = true;
   const startedAt = Date.now();
-  logBackgroundDiagnostic("wake_start", { mode: fullTest ? "manual" : "auto" });
+  logBackgroundDiagnostic("wake_start", { mode: wakeTrigger });
   await incrementWakeCounter(WAKE_ATTEMPTS_KEY);
   try {
     const test = await measureConnection({ fullTest });
@@ -296,7 +374,9 @@ async function runSpeedNudge({ fullTest = false } = {}) {
     await syncUninstallURL();
 
     const now = Date.now();
-    const historyKey = fullTest ? REAL_TEST_HISTORY_KEY : WAKE_HISTORY_KEY;
+    const historyKey = trigger === "watchdog"
+      ? WAKE_HISTORY_KEY
+      : (fullTest ? REAL_TEST_HISTORY_KEY : WAKE_HISTORY_KEY);
     const stored = await chrome.storage.local.get([historyKey, STATUS_KEY]);
     const history = pruneHistory(stored[historyKey], now);
     history.push([now, roundMbps(test.downloadMbps), roundMbps(test.uploadMbps)]);
@@ -305,14 +385,14 @@ async function runSpeedNudge({ fullTest = false } = {}) {
     const beforeUpload = Number.isFinite(previous.uploadMbps) ? previous.uploadMbps : null;
     const timeToRecoverMs = Math.max(0, now - startedAt);
     logBackgroundDiagnostic("wake_success", {
-      mode: fullTest ? "manual" : "auto",
+      mode: wakeTrigger,
       downloadMbps: roundMbps(test.downloadMbps),
       uploadMbps: roundMbps(test.uploadMbps),
       timeToRecoverMs,
       server: test.server
     });
     sendAnalyticsEvent("wake_success", {
-      trigger: fullTest ? "manual" : "auto",
+      trigger: wakeTrigger,
       time_to_recover_ms: timeToRecoverMs,
       before_download_mbps: beforeDownload,
       after_download_mbps: roundMbps(test.downloadMbps),
@@ -342,12 +422,12 @@ async function runSpeedNudge({ fullTest = false } = {}) {
     const timeToFailMs = Math.max(0, Date.now() - startedAt);
     const errorType = categorizeWakeError(error);
     logBackgroundDiagnostic("wake_failure", {
-      mode: fullTest ? "manual" : "auto",
+      mode: wakeTrigger,
       errorType,
       timeToFailMs
     }, error);
     sendAnalyticsEvent("wake_failure", {
-      trigger: fullTest ? "manual" : "auto",
+      trigger: wakeTrigger,
       error_type: errorType,
       time_to_fail_ms: timeToFailMs
     });
@@ -592,9 +672,9 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function fetchWithTimeout(url, options) {
+async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const externalSignal = options.signal;
   const abortFromCaller = () => controller.abort();
   externalSignal?.addEventListener("abort", abortFromCaller, { once: true });

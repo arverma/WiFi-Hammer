@@ -13,7 +13,7 @@ const context = {
       setUninstallURL: async () => {},
       getPlatformInfo: async () => ({ os: "mac" }),
       getBrowserInfo: async () => ({ browser: "Chrome", version: "131.0.6778.86" }),
-      getManifest: () => ({ version: "1.0.6" })
+      getManifest: () => ({ version: "1.0.7" })
     },
     alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener() {} } },
     storage: {
@@ -30,7 +30,7 @@ const context = {
   performance,
   trackEvent: (name, params) => installationEvents.push({ name, params })
 };
-vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
+vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testProbeNetwork = probeNetwork; this.testShouldTriggerWatchdogHammer = shouldTriggerWatchdogHammer; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
 
 context.testHandleInstalled({ reason: "install" });
 context.testHandleInstalled({ reason: "update", previousVersion: "1.0.5" });
@@ -81,8 +81,8 @@ if (!analytics.isUrlOrIp("https://fast.com/app.js") || !analytics.isUrlOrIp("htt
 if (analytics.isUrlOrIp("manual") || analytics.isUrlOrIp("timeout") || analytics.isUrlOrIp("1.0.5")) {
   throw new Error("isUrlOrIp falsely flagged valid event params");
 }
-if (JSON.parse(fs.readFileSync("manifest.json", "utf8")).version !== "1.0.6") {
-  throw new Error("Manifest version is not 1.0.6");
+if (JSON.parse(fs.readFileSync("manifest.json", "utf8")).version !== "1.0.7") {
+  throw new Error("Manifest version is not 1.0.7");
 }
 const popupCss = fs.readFileSync("popup.css", "utf8");
 if (!popupCss.includes("body.hammering:not(:hover)") || !popupCss.includes("body.hammering:not(:hover) .btn-speed-test[aria-busy=\"true\"] img")) {
@@ -103,14 +103,14 @@ if (sanitized.trigger !== "manual" || sanitized.leak_url || sanitized.leak_ip ||
 
 const testUninstallUrl = context.testBuildUninstallURL({
   baseUrl: "https://forms.gle/eXVFdDdEfMxhKnqp6",
-  version: "1.0.6",
+  version: "1.0.7",
   os: "mac",
   daysInstalled: 3,
   attempts: 15,
   successes: 12
 });
 const parsedUninstallUrl = new URL(testUninstallUrl);
-if (parsedUninstallUrl.searchParams.get("v") !== "1.0.6") throw new Error("Uninstall URL version param mismatch");
+if (parsedUninstallUrl.searchParams.get("v") !== "1.0.7") throw new Error("Uninstall URL version param mismatch");
 if (parsedUninstallUrl.searchParams.get("os") !== "mac") throw new Error("Uninstall URL os param mismatch");
 if (parsedUninstallUrl.searchParams.get("days") !== "3") throw new Error("Uninstall URL days param mismatch");
 if (parsedUninstallUrl.searchParams.get("attempts") !== "15") throw new Error("Uninstall URL attempts param mismatch");
@@ -297,7 +297,32 @@ async function assertAnalyticsStorageAndSend() {
   if (!store.ga_session || store.ga_session.id !== event.params.session_id) {
     throw new Error("Session ID was not stored in chrome.storage.session");
   }
+
   if (mockContext.fetch === undefined || !capturedPayload) throw new Error("Analytics request was not captured");
+}
+
+async function assertWatchdogProbe() {
+  let cancelled = false;
+  context.fetch = async (url, options) => {
+    if (url !== "https://fast.com/favicon.ico" || options.cache !== "no-store" || options.credentials !== "omit") {
+      throw new Error("Watchdog probe request was not configured correctly");
+    }
+    return {
+      ok: true,
+      url,
+      body: { cancel: async () => { cancelled = true; } }
+    };
+  };
+  const probe = await context.testProbeNetwork();
+  if (!probe.healthy || !Number.isFinite(probe.rttMs) || !cancelled) {
+    throw new Error("Watchdog probe did not measure a successful response");
+  }
+  if (context.testShouldTriggerWatchdogHammer({ healthy: false, consecutiveFailures: 1 })) {
+    throw new Error("Watchdog hammered after one failed probe");
+  }
+  if (!context.testShouldTriggerWatchdogHammer({ healthy: false, consecutiveFailures: 2 })) {
+    throw new Error("Watchdog did not hammer after two failed probes");
+  }
 }
 
 async function assertUninstallURLSync() {
@@ -324,7 +349,7 @@ async function assertUninstallURLSync() {
         onMessage: { addListener() {} },
         setUninstallURL: async (u) => { setUninstallURLCalledWith = u; },
         getPlatformInfo: async () => ({ os: "mac" }),
-        getManifest: () => ({ version: "1.0.6" })
+        getManifest: () => ({ version: "1.0.7" })
       },
       alarms: { create: async () => {}, clear: async () => {}, onAlarm: { addListener() {} } }
     },
@@ -352,7 +377,7 @@ async function assertUninstallURLSync() {
     throw new Error("setUninstallURL was not called with the configured URL");
   }
   const u1 = new URL(setUninstallURLCalledWith);
-  if (u1.searchParams.get("v") !== "1.0.6") throw new Error("Version mismatch in setUninstallURL");
+  if (u1.searchParams.get("v") !== "1.0.7") throw new Error("Version mismatch in setUninstallURL");
   if (u1.searchParams.get("attempts") !== "0") throw new Error("Initial attempts should be 0");
   if (u1.searchParams.get("successes") !== "0") throw new Error("Initial successes should be 0");
 
@@ -408,6 +433,7 @@ async function assertDiagnosticsLogger() {
 Promise.all([
   assertDownloadCountsBytesBeforeBodyFinishes(),
   assertAnalyticsStorageAndSend(),
+  assertWatchdogProbe(),
   assertUninstallURLSync(),
   assertDiagnosticsLogger()
 ])

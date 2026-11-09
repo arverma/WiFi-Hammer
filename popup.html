@@ -108,7 +108,7 @@
         </div>
       </div>
     </div>
-    <p class="chart-subtitle" id="chart-subtitle">Auto wake is a light check, so low speeds are normal.</p>
+    <p class="chart-subtitle" id="chart-subtitle">Auto wake checks quietly and only hammers after two failed checks.</p>
 
     <div class="chart-wrap">
       <svg id="chart" viewBox="0 0 340 132" role="img" aria-label="Wi‑Fi speed over the last 24 hours"></svg>
@@ -149,8 +149,8 @@
         <span class="fact-icon">&#127959;</span>
         <div class="fact-body">
           <p class="fact-title">Hammer or let it run</p>
-          <p class="fact-desc">Tap Hammer Hard when a call stalls, or leave auto wakes on. Same wake-up, no
-            trip to the router.</p>
+          <p class="fact-desc">Tap Hammer Hard when a call stalls, or leave the watchdog on. It checks quietly and
+            hammers only when Wi‑Fi looks stuck.</p>
         </div>
       </div>
 
@@ -158,8 +158,8 @@
         <span class="fact-icon">&#128678;</span>
         <div class="fact-body">
           <p class="fact-title">See the last 24 hours</p>
-          <p class="fact-desc">The chart shows auto wakes. Hammer Hard wakes harder when stuck and can use more
-            data.</p>
+          <p class="fact-desc">The chart shows automatic recoveries. Hammer Hard wakes harder when stuck and can
+            use more data.</p>
         </div>
       </div>
 
@@ -168,9 +168,9 @@
       <div class="fact-card">
         <span class="fact-icon">&#128207;</span>
         <div class="fact-body">
-          <p class="fact-title">Auto wake is a light check, so low speeds are normal</p>
-          <p class="fact-desc">It moves only a tiny amount of data (about 128 KB down, 64 KB up) just to wake
-            Wi‑Fi, so the numbers read low. Hammer Hard runs a full speed test for real numbers.</p>
+          <p class="fact-title">The watchdog checks quietly</p>
+          <p class="fact-desc">It sends a tiny request at your chosen interval and only runs the heavier wake after
+            two failed checks. Hammer Hard runs a full speed test for real numbers.</p>
         </div>
       </div>
 

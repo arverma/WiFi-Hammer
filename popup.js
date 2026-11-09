@@ -468,10 +468,10 @@ function render() {
   document.getElementById("range-label").textContent = RANGE_LABELS[selectedRange];
   const subtitle = document.getElementById("chart-subtitle");
   if (subtitle) {
-    subtitle.title = "Auto wake downloads only ~128 KB and uploads ~64 KB, so it reads low. Hammer Hard runs a full speed test.";
+    subtitle.title = "The watchdog sends a tiny request and only hammers after two failed checks. Hammer Hard runs a full speed test.";
     subtitle.textContent = isEmpty
       ? "Call lagging? Hit Hammer Hard — no walk to the router."
-      : "Auto wake is a light check, so low speeds are normal.";
+      : "Auto wake checks quietly and only hammers after two failed checks.";
   }
   const ispHint = document.getElementById("isp-hint");
   if (ispHint) {

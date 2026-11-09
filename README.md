@@ -8,16 +8,16 @@ Stuck Wi‑Fi is usually an idle link, not a broken router. WiFi Hammer sends re
 
 | | Auto wake | Hammer Hard |
 |---|---|---|
-| Trigger | Every 5 min to 6 hr (default 30 min), first run 1 min after enabling | You click it, then confirm with a second tap |
-| Traffic | One small probe: about 128 KB down, 64 KB up | A full speed test: up to 10 s down and 10 s up, up to 8 connections |
-| Data used | About 192 KB per wake | Can be a lot. On a limited plan, use it sparingly |
-| Speeds shown | Read low, which is normal for a tiny probe | Real speeds |
-| In the 24-hour chart | Yes | No |
+| Trigger | A cheap check every 5 min to 6 hr (default 30 min), first run 1 min after enabling | You click it, then confirm with a second tap |
+| Traffic | One tiny Fast.com request; it hard-hammers only after two failed checks | A full speed test: up to 10 s down and 10 s up, up to 8 connections |
+| Data used | Usually only the small response body | Can be a lot. On a limited plan, use it sparingly |
+| Speeds shown | Only after an automatic recovery | Real speeds |
+| In the 24-hour chart | Automatic recoveries | No |
 
 ## Features
 
 - **Hammer Hard:** one big button, with a confirm step so it can't be hit by accident. Progress shows at the top while it runs.
-- **Auto wake:** runs on a schedule you choose, and can be paused or resumed at any time. It is on by default.
+- **Auto wake:** checks the network on a schedule you choose and only runs the heavier wake after two consecutive unhealthy checks. It can be paused or resumed at any time and is on by default.
 - **Last 24 hours chart:** download and upload from auto wakes, kept for 24 hours.
 - **Status line:** shows the time of the last wake (auto or Hammer Hard), or live progress while one is running. A failed wake shows its error.
 - **Why this works panel:** a short explanation, plus a Diagnostics view with a local log of recent events (last 50) for troubleshooting.
@@ -49,11 +49,11 @@ The zip contains the popup, service worker, analytics and diagnostics scripts, i
 
 **Network traffic:**
 - **Fast.com and Netflix Open Connect:** the speed-test servers used for waking and measuring.
-- **Google Analytics:** WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. Events cover opening the popup, pressing Hammer Hard, turning auto wake on or off, changing the interval, wake success or failure, and the rating prompt. They include anonymous before/after speed readings in Mbps, time to recover, your operating system, the extension version, and a random ID generated on your device that isn't linked to you.
+- **Google Analytics:** WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. Events cover popup usage, network probes, automatic recovery decisions, pressing Hammer Hard, turning auto wake on or off, changing the interval, wake success or failure, and the rating prompt. They include anonymous before/after speed readings in Mbps, probe results and timing, your parsed operating system (`os`), parsed Chrome version (`chrome_version`), the extension version, and a random ID generated on your device that isn't linked to you. It never sends raw user-agent strings, SSIDs, visited URLs, or IP addresses.
 - **Uninstall feedback:** after uninstalling, you land on an optional feedback form. The link carries the extension version, operating system, days installed and wake counts.
 
 **Permissions:** `alarms` for the schedule, `storage` for local data, and host access limited to `fast.com` and `nflxvideo.net`. Analytics needs no host permission.
 
-Fast.com's API is undocumented and may change. If it does, the extension shows the failure and records nothing made up.
+Fast.com's API is undocumented and may change. If it does, the extension shows the failure and records nothing made up. The watchdog uses only an already-permitted Fast.com request and does not add a host permission.
 
 This extension does not make your plan faster. It only wakes a stuck connection.
