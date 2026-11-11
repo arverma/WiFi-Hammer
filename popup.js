@@ -236,7 +236,7 @@ async function updateFrequency(event) {
   try {
     const response = await sendMessage({ type: "setFrequency", minutes });
     if (!response?.ok) throw new Error(response?.error || "Unable to update frequency.");
-    flashStatus(`Every ${formatFrequency(response.minutes)}`);
+    flashStatus(`Checking every ${formatFrequency(response.minutes)}`);
   } catch (error) {
     console.error("Unable to update frequency:", error);
     setControlStatus("Pick another time");
@@ -379,7 +379,7 @@ function renderControls() {
       : "M5 3.5v9l7-4.5z");
   }
   document.getElementById("toggle-label").textContent = monitoringEnabled ? "Pause" : "Resume";
-  const toggleName = monitoringEnabled ? "Pause monitoring" : "Resume monitoring";
+  const toggleName = monitoringEnabled ? "Pause auto hammer" : "Resume auto hammer";
   toggle.setAttribute("aria-label", toggleName);
   toggle.title = toggleName;
   toggle.setAttribute("aria-pressed", String(monitoringEnabled));
@@ -387,14 +387,14 @@ function renderControls() {
   const pill = document.getElementById("status");
   if (!monitoringEnabled) {
     pill.dataset.state = "paused";
-    pill.setAttribute("aria-label", "Monitoring paused");
+    pill.setAttribute("aria-label", "Auto hammer paused");
     if (!statusFlash) setControlStatus("Paused");
   } else if (history.length > 0) {
     pill.dataset.state = "ready";
-    pill.setAttribute("aria-label", "Wi‑Fi wakes are on");
+    pill.setAttribute("aria-label", "Auto hammer is on");
   } else {
     pill.dataset.state = "empty";
-    pill.setAttribute("aria-label", "No wakes yet");
+    pill.setAttribute("aria-label", "No auto hammers yet");
   }
 }
 
@@ -471,7 +471,7 @@ function render() {
     subtitle.title = "The watchdog sends a tiny request and only hammers after two failed checks. Hammer Hard runs a full speed test.";
     subtitle.textContent = isEmpty
       ? "Call lagging? Hit Hammer Hard — no walk to the router."
-      : "Auto wake checks quietly and only hammers after two failed checks.";
+      : "Auto hammer checks quietly and only hammers after two failed checks.";
   }
   const ispHint = document.getElementById("isp-hint");
   if (ispHint) {
@@ -481,7 +481,7 @@ function render() {
   const pill = document.getElementById("status");
   if (monitoringEnabled) {
     pill.dataset.state = latest ? "ready" : "empty";
-    pill.setAttribute("aria-label", latest ? "Wi‑Fi wakes are on" : "No wakes yet");
+    pill.setAttribute("aria-label", latest ? "Auto hammer is on" : "No auto hammers yet");
   }
   applyIdleStatus();
   drawChart(selectPoints(history));
@@ -496,9 +496,9 @@ function drawChart(points) {
     empty.setAttribute("y", "72");
     empty.setAttribute("text-anchor", "middle");
     empty.setAttribute("class", "axis-label");
-    empty.textContent = "No wakes yet — first one runs soon";
+    empty.textContent = "No auto hammers yet — Wi‑Fi looks healthy";
     chart.append(empty);
-    chart.setAttribute("aria-label", "No wakes in the last 24 hours");
+    chart.setAttribute("aria-label", "No auto hammers in the last 24 hours");
     return;
   }
 

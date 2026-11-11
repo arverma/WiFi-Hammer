@@ -85,15 +85,15 @@
       <span class="chart-title" id="range-label">Last 24 hours</span>
       <div class="schedule-group">
         <button class="btn-pause" id="toggle-monitoring" type="button" aria-pressed="true"
-          aria-label="Pause monitoring">
+          aria-label="Pause auto hammer">
           <svg id="toggle-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M4 3h2v10H4zM10 3h2v10h-2z" />
           </svg>
           <span id="toggle-label">Pause</span>
         </button>
         <div class="interval-wrap">
-          <span class="interval-label">Every</span>
-          <select class="frequency-select" id="frequency" aria-label="Automatic wake interval">
+          <span class="interval-label">Check every</span>
+          <select class="frequency-select" id="frequency" aria-label="Connection check interval">
             <option value="5">5 min</option>
             <option value="10">10 min</option>
             <option value="15">15 min</option>
@@ -108,7 +108,7 @@
         </div>
       </div>
     </div>
-    <p class="chart-subtitle" id="chart-subtitle">Auto wake checks quietly and only hammers after two failed checks.</p>
+    <p class="chart-subtitle" id="chart-subtitle">Auto hammer checks quietly and only hammers after two failed checks.</p>
 
     <div class="chart-wrap">
       <svg id="chart" viewBox="0 0 340 132" role="img" aria-label="Wi‑Fi speed over the last 24 hours"></svg>
@@ -178,8 +178,8 @@
 
       <ul class="insight-list">
         <li>Skip the router restart</li>
-        <li>Auto wake every 5 minutes to 6 hours</li>
-        <li>Pause anytime</li>
+        <li>Connection check every 5 minutes to 6 hours</li>
+        <li>Pause auto hammer anytime</li>
         <li>History stays on this laptop only</li>
         <li>Hammer Hard stays off this chart</li>
         <li>Failed wakes show up here</li>
