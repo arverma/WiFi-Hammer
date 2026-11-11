@@ -30,7 +30,7 @@ const context = {
   performance,
   trackEvent: (name, params) => installationEvents.push({ name, params })
 };
-vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testProbeNetwork = probeNetwork; this.testShouldTriggerWatchdogHammer = shouldTriggerWatchdogHammer; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
+vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testProbeNetwork = probeNetwork; this.testFetchFastConfig = fetchFastConfig; this.testShouldTriggerWatchdogHammer = shouldTriggerWatchdogHammer; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
 
 context.testHandleInstalled({ reason: "install" });
 context.testHandleInstalled({ reason: "update", previousVersion: "1.0.5" });
@@ -442,3 +442,26 @@ Promise.all([
     console.error(error);
     process.exitCode = 1;
   });
+
+// Regression: connection drops while the router wakes, then returns. fetchFastConfig
+// must ride it out instead of failing on the first unreachable attempt.
+(async () => {
+  let configCalls = 0;
+  context.fetch = async (url) => {
+    const u = String(url);
+    if (!u.includes("api.fast.com")) throw new Error("offline");
+    configCalls += 1;
+    if (configCalls < 4) throw new Error("offline");
+    return { ok: true, json: async () => ({ targets: [{ url: "https://x/speedtest" }] }) };
+  };
+  const config = await context.testFetchFastConfig({ recoveryWindowMs: 5000, retryDelayMs: 1 });
+  if (configCalls !== 4 || config.targets.length !== 1) throw new Error("fetchFastConfig did not retry until recovery");
+
+  context.fetch = async () => { throw new Error("offline"); };
+  let failed = false;
+  try { await context.testFetchFastConfig({ recoveryWindowMs: 20, retryDelayMs: 5 }); } catch (e) {
+    failed = /speed test/.test(e.message);
+  }
+  if (!failed) throw new Error("fetchFastConfig should fail after the recovery window");
+  console.log("recovery-retry tests passed");
+})().catch((e) => { console.error(e); process.exit(1); });
