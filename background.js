@@ -18,6 +18,10 @@ const CONFIG_ENDPOINT = "https://api.fast.com/netflix/speedtest/v2";
 const FAST_FALLBACK_TOKEN = "YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm";
 const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours — rolling window
 const REQUEST_TIMEOUT_MS = 10_000;
+// A router wake-up drops the link for ~30-60s, so keep retrying the speed-test
+// config instead of reporting "unreachable" while the connection is coming back.
+const RECOVERY_WINDOW_MS = 90_000;
+const RECOVERY_RETRY_DELAY_MS = 3_000;
 const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_RTT_THRESHOLD_MS = 3_000;
 const PROBE_FAILURE_THRESHOLD = 2;
@@ -621,7 +625,10 @@ async function readMeasuredBody(type, response, chunkBytes, onBytes) {
   return total;
 }
 
-async function fetchFastConfig() {
+async function fetchFastConfig({
+  recoveryWindowMs = RECOVERY_WINDOW_MS,
+  retryDelayMs = RECOVERY_RETRY_DELAY_MS
+} = {}) {
   let token = null;
   try {
     const homeResponse = await fetchWithTimeout(FAST_HOME_URL, {
@@ -656,11 +663,22 @@ async function fetchFastConfig() {
     token,
     urlCount: 5
   });
-  try {
-    return await fetchJson(configUrl);
-  } catch (err) {
-    logBackgroundDiagnostic("fast_config_failed", { note: "Speed test endpoint unreachable" }, err);
-    throw new Error("Couldn't reach the speed test — check your connection.");
+  const deadline = Date.now() + recoveryWindowMs;
+  let attempts = 0;
+  while (true) {
+    attempts += 1;
+    try {
+      return await fetchJson(configUrl);
+    } catch (err) {
+      if (Date.now() + retryDelayMs >= deadline) {
+        logBackgroundDiagnostic("fast_config_failed", {
+          note: "Speed test endpoint unreachable",
+          attempts
+        }, err);
+        throw new Error("Couldn't reach the speed test — check your connection.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
   }
 }
 

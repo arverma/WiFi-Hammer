@@ -6,7 +6,7 @@ A Chrome extension that wakes a stuck Wi‑Fi connection with one click, so you 
 
 Stuck Wi‑Fi is usually an idle link, not a broken router. WiFi Hammer sends real traffic through the connection to wake it up, using Fast.com's test servers.
 
-| | Auto wake | Hammer Hard |
+| | Auto hammer | Hammer Hard |
 |---|---|---|
 | Trigger | A cheap check every 5 min to 6 hr (default 30 min), first run 1 min after enabling | You click it, then confirm with a second tap |
 | Traffic | One tiny Fast.com request; it hard-hammers only after two failed checks | A full speed test: up to 10 s down and 10 s up, up to 8 connections |
@@ -17,8 +17,8 @@ Stuck Wi‑Fi is usually an idle link, not a broken router. WiFi Hammer sends re
 ## Features
 
 - **Hammer Hard:** one big button, with a confirm step so it can't be hit by accident. Progress shows at the top while it runs.
-- **Auto wake:** checks the network on a schedule you choose and only runs the heavier wake after two consecutive unhealthy checks. It can be paused or resumed at any time and is on by default.
-- **Last 24 hours chart:** download and upload from auto wakes, kept for 24 hours.
+- **Auto hammer:** checks the network every 5 min to 6 hr (you choose) and only runs the heavier wake after two consecutive unhealthy checks. It can be paused or resumed at any time and is on by default.
+- **Last 24 hours chart:** download and upload from auto hammers, kept for 24 hours.
 - **Status line:** shows the time of the last wake (auto or Hammer Hard), or live progress while one is running. A failed wake shows its error.
 - **Why this works panel:** a short explanation, plus a Diagnostics view with a local log of recent events (last 50) for troubleshooting.
 - **Rating prompt:** after a few successful wakes, a small banner asks for a Chrome Web Store review. It can be dismissed for good.
