@@ -34,6 +34,29 @@ const UPLOAD_CHUNK_BYTES = 2_621_440;
 const PROBE_DOWNLOAD_BYTES = 128_000;
 const PROBE_UPLOAD_BYTES = 64_000;
 let measurementInFlight = false;
+let wakeAbortController = null;
+let wakeCancelRequested = false;
+
+function isWakeCancelError(error) {
+  return wakeCancelRequested || (error instanceof Error && /cancelled by user/i.test(error.message));
+}
+
+function cancelActiveWake() {
+  if (!measurementInFlight || !wakeAbortController) return false;
+  wakeCancelRequested = true;
+  try {
+    wakeAbortController.abort();
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
+function throwIfWakeCancelled() {
+  if (wakeCancelRequested || wakeAbortController?.signal?.aborted) {
+    throw new Error("Cancelled by user.");
+  }
+}
 
 if (typeof importScripts === "function") {
   try {
@@ -197,7 +220,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "runNow") {
     void runSpeedNudge({ fullTest: true })
       .then((result) => sendResponse({ ok: true, result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error) => sendResponse({ ok: false, error: error.message, cancelled: isWakeCancelError(error) }));
+    return true;
+  }
+
+  if (message?.type === "cancelWake") {
+    const cancelled = cancelActiveWake();
+    sendResponse({ ok: true, cancelled });
     return true;
   }
 
@@ -374,11 +403,14 @@ async function runSpeedNudge({ fullTest = false, trigger } = {}) {
     throw new Error("A wake-up is already running.");
   }
   measurementInFlight = true;
+  wakeCancelRequested = false;
+  wakeAbortController = new AbortController();
   const startedAt = Date.now();
   logBackgroundDiagnostic("wake_start", { mode: wakeTrigger });
   await incrementWakeCounter(WAKE_ATTEMPTS_KEY);
   try {
     const test = await measureConnection({ fullTest });
+    throwIfWakeCancelled();
     if (!Number.isFinite(test.downloadMbps) || !Number.isFinite(test.uploadMbps)) {
       throw new Error("Could not wake Wi‑Fi this time.");
     }
@@ -433,6 +465,28 @@ async function runSpeedNudge({ fullTest = false, trigger } = {}) {
     return history.at(-1);
   } catch (error) {
     const timeToFailMs = Math.max(0, Date.now() - startedAt);
+    const previous = await chrome.storage.local.get(STATUS_KEY);
+    const prior = previous[STATUS_KEY] || {};
+    if (isWakeCancelError(error)) {
+      logBackgroundDiagnostic("wake_cancelled", { mode: wakeTrigger, timeToFailMs });
+      sendAnalyticsEvent("wake_cancelled", {
+        trigger: wakeTrigger,
+        time_to_cancel_ms: timeToFailMs
+      });
+      const cancelledStatus = {
+        lastAttemptAt: startedAt,
+        lastSuccessAt: prior.lastSuccessAt || null,
+        lastCheckAt: prior.lastCheckAt || null,
+        lastHammerAt: prior.lastHammerAt || null,
+        lastError: null
+      };
+      if (Number.isFinite(prior.downloadMbps)) cancelledStatus.downloadMbps = prior.downloadMbps;
+      if (Number.isFinite(prior.uploadMbps)) cancelledStatus.uploadMbps = prior.uploadMbps;
+      if (prior.mode) cancelledStatus.mode = prior.mode;
+      await chrome.storage.local.set({ [STATUS_KEY]: cancelledStatus });
+      await syncUninstallURL();
+      throw new Error("Cancelled by user.");
+    }
     const errorType = categorizeWakeError(error);
     logBackgroundDiagnostic("wake_failure", {
       mode: wakeTrigger,
@@ -445,21 +499,23 @@ async function runSpeedNudge({ fullTest = false, trigger } = {}) {
       time_to_fail_ms: timeToFailMs
     });
     console.warn("WiFi Hammer speed nudge failed:", error);
-    const previous = await chrome.storage.local.get(STATUS_KEY);
-    const prior = previous[STATUS_KEY] || {};
-    await chrome.storage.local.set({
-      [STATUS_KEY]: {
-        lastAttemptAt: startedAt,
-        lastSuccessAt: prior.lastSuccessAt || null,
-        lastCheckAt: prior.lastCheckAt || null,
-        lastHammerAt: prior.lastHammerAt || null,
-        lastError: error instanceof Error ? error.message : "Wake-up failed."
-      }
-    });
+    const failedStatus = {
+      lastAttemptAt: startedAt,
+      lastSuccessAt: prior.lastSuccessAt || null,
+      lastCheckAt: prior.lastCheckAt || null,
+      lastHammerAt: prior.lastHammerAt || null,
+      lastError: error instanceof Error ? error.message : "Wake-up failed."
+    };
+    if (Number.isFinite(prior.downloadMbps)) failedStatus.downloadMbps = prior.downloadMbps;
+    if (Number.isFinite(prior.uploadMbps)) failedStatus.uploadMbps = prior.uploadMbps;
+    if (prior.mode) failedStatus.mode = prior.mode;
+    await chrome.storage.local.set({ [STATUS_KEY]: failedStatus });
     await syncUninstallURL();
     throw error;
   } finally {
     measurementInFlight = false;
+    wakeAbortController = null;
+    wakeCancelRequested = false;
   }
 }
 
@@ -553,6 +609,7 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
 
   const worker = async (workerIndex) => {
     while (performance.now() < stopAt) {
+      throwIfWakeCancelled();
       const target = targets[(nextTargetIndex++) % Math.min(targets.length, 5)] || primaryTarget;
       const controller = new AbortController();
       controllers.add(controller);
@@ -570,6 +627,7 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
           bytesByConnection[workerIndex] += byteLength;
         });
       } catch (error) {
+        if (isWakeCancelError(error) || wakeAbortController?.signal?.aborted) throw new Error("Cancelled by user.");
         if (controller.signal.aborted) return;
         logBackgroundDiagnostic("worker_conn_reset", { workerIndex, type }, error);
         break;
@@ -583,7 +641,9 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
   
   let elapsed = 0;
   while (elapsed < MAX_TEST_SECONDS) {
+    throwIfWakeCancelled();
     await new Promise((resolve) => setTimeout(resolve, 1000));
+    throwIfWakeCancelled();
     elapsed++;
     const currentBytes = bytesByConnection.reduce((sum, value) => sum + value, 0);
     const currentElapsed = Math.max((performance.now() - started) / 1000, 0.001);
@@ -601,6 +661,7 @@ async function measurePhase(type, primaryTarget, targets, chunkBytes) {
 
   controllers.forEach((controller) => controller.abort());
   await Promise.allSettled(workers);
+  throwIfWakeCancelled();
 
   const elapsedSeconds = Math.max((performance.now() - started) / 1000, MIN_TEST_SECONDS);
   const bytes = bytesByConnection.reduce((sum, value) => sum + value, 0);
@@ -675,10 +736,12 @@ async function fetchFastConfig({
   const deadline = Date.now() + recoveryWindowMs;
   let attempts = 0;
   while (true) {
+    throwIfWakeCancelled();
     attempts += 1;
     try {
       return await fetchJson(configUrl);
     } catch (err) {
+      if (isWakeCancelError(err)) throw new Error("Cancelled by user.");
       if (Date.now() + retryDelayMs >= deadline) {
         logBackgroundDiagnostic("fast_config_failed", {
           note: "Speed test endpoint unreachable",
@@ -687,6 +750,7 @@ async function fetchFastConfig({
         throw new Error("Couldn't reach the speed test — check your connection.");
       }
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      throwIfWakeCancelled();
     }
   }
 }
@@ -700,11 +764,15 @@ async function fetchJson(url) {
 }
 
 async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS, { allowOpaque = false } = {}) {
+  throwIfWakeCancelled();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const externalSignal = options.signal;
+  const wakeSignal = wakeAbortController?.signal;
   const abortFromCaller = () => controller.abort();
   externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  wakeSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (externalSignal?.aborted || wakeSignal?.aborted) controller.abort();
   try {
     const response = await fetch(url, {
       ...options,
@@ -714,9 +782,13 @@ async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS, { 
       throw new Error(`Network failed (${response.status}).`);
     }
     return response;
+  } catch (error) {
+    if (isWakeCancelError(error) || wakeSignal?.aborted) throw new Error("Cancelled by user.");
+    throw error;
   } finally {
     clearTimeout(timeout);
     externalSignal?.removeEventListener("abort", abortFromCaller);
+    wakeSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
 

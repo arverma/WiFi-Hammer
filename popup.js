@@ -17,6 +17,21 @@ let monitoringEnabled = true;
 let lastPulseAt = 0;
 let statusFlash = null;
 let statusFlashTimer = null;
+let lastFullSpeeds = null;
+
+// Last Hammer Hard (or other full test) stays on the cards until the next full run.
+// A watchdog probe updates status without a new full measurement, so keep the previous pair.
+function speedsFromStatus(status, previous = null) {
+  if (
+    status &&
+    status.mode === "full" &&
+    Number.isFinite(status.downloadMbps) &&
+    Number.isFinite(status.uploadMbps)
+  ) {
+    return { download: status.downloadMbps, upload: status.uploadMbps };
+  }
+  return previous;
+}
 
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", () => {
@@ -83,8 +98,7 @@ function handleSpeedTestProgress(progress) {
     return;
   }
 
-  const latest = history[history.length - 1];
-  const known = latest ? latest[phase === "download" ? 1 : 2] : null;
+  const known = metricMbps(phase === "download" ? 0 : 1);
   if (Number.isFinite(known)) {
     el.innerHTML = `${formatNumber(known)} <span class="metric-unit">Mbps</span><span class="metric-checking">checking…</span>`;
   } else {
@@ -224,6 +238,7 @@ async function loadMonitoringState() {
     document.getElementById("frequency").value = String(response.minutes);
     renderControls();
     renderHealth(response.status);
+    render();
   } catch (error) {
     console.error("Unable to load monitoring state:", error);
     setControlStatus("Couldn't load status");
@@ -264,7 +279,23 @@ async function toggleMonitoring() {
   }
 }
 
+const HAMMER_LABEL = "Hammer Hard";
+const HAMMERING_LABEL = "Hammering Hard";
 let confirmTimeout = null;
+
+function setHammerLabel(label, typing) {
+  if (!label) return;
+  if (!typing) {
+    label.textContent = HAMMER_LABEL;
+    return;
+  }
+  label.replaceChildren(...Array.from(HAMMERING_LABEL, (ch, index) => {
+    const letter = document.createElement("span");
+    letter.textContent = ch === " " ? "\u00a0" : ch;
+    letter.style.setProperty("--i", String(index));
+    return letter;
+  }));
+}
 
 function logPopupDiagnostic(event, details = null, error = null) {
   if (typeof logDiagnostic === "function") {
@@ -275,6 +306,18 @@ function logPopupDiagnostic(event, details = null, error = null) {
 async function runNow() {
   const button = document.getElementById("run-now");
   const label = document.getElementById("run-now-label");
+
+  // While a run is in progress, hover shows Cancel; a click aborts the wake.
+  if (button.getAttribute("aria-busy") === "true") {
+    logPopupDiagnostic("hammer_cancel_clicked");
+    sendAnalyticsEvent("hammer_cancelled", { trigger: "manual" });
+    try {
+      await sendMessage({ type: "cancelWake" });
+    } catch (error) {
+      console.warn("WiFi Hammer cancel failed:", error);
+    }
+    return;
+  }
 
   // On Windows Chrome, window.confirm() causes the popup to lose window focus and unload.
   // Instead, use an inline confirmation state directly on the button.
@@ -287,7 +330,7 @@ async function runNow() {
     if (confirmTimeout) clearTimeout(confirmTimeout);
     confirmTimeout = setTimeout(() => {
       button.classList.remove("confirming");
-      if (label) label.textContent = "Hammer Hard";
+      setHammerLabel(label, false);
       applyIdleStatus();
       confirmTimeout = null;
     }, 4000);
@@ -304,33 +347,47 @@ async function runNow() {
   logPopupDiagnostic("hammer_confirmed");
   clearStatusFlash();
   button.setAttribute("aria-busy", "true");
-  if (label) label.textContent = "Hammering…";
+  button.title = "Cancel wake";
+  setHammerLabel(label, true);
   document.body.classList.add("hammering");
   setControlStatus("Waking Wi‑Fi…");
   showCheckingMetrics();
   try {
     const response = await sendMessage({ type: "runNow" });
-    if (!response?.ok) throw new Error(response?.error || "Could not wake Wi‑Fi.");
+    if (!response?.ok) {
+      if (response?.cancelled || /cancelled by user/i.test(String(response?.error || ""))) {
+        await loadMonitoringState();
+        flashStatus("Cancelled");
+        return;
+      }
+      throw new Error(response?.error || "Could not wake Wi‑Fi.");
+    }
     await loadMonitoringState();
     flashStatus("Wi‑Fi awake");
     void checkAndShowRatingPrompt();
   } catch (error) {
-    console.error("Hammer Hard failed:", error);
-    logPopupDiagnostic("hammer_failed", null, error);
-    setControlStatus("Couldn't wake Wi‑Fi");
+    if (/cancelled by user/i.test(String(error?.message || error))) {
+      await loadMonitoringState();
+      flashStatus("Cancelled");
+    } else {
+      console.error("Hammer Hard failed:", error);
+      logPopupDiagnostic("hammer_failed", null, error);
+      setControlStatus("Couldn't wake Wi‑Fi");
+    }
   } finally {
     button.removeAttribute("aria-busy");
-    if (label) label.textContent = "Hammer Hard";
+    button.title = "Hammer Hard — wake stuck Wi‑Fi";
+    setHammerLabel(label, false);
     document.body.classList.remove("hammering");
+    render();
   }
 }
 
 function showCheckingMetrics() {
-  const latest = history[history.length - 1];
   ["download-value", "upload-value"].forEach((id, index) => {
     const el = document.getElementById(id);
     if (!el) return;
-    const known = latest ? latest[index + 1] : null;
+    const known = metricMbps(index);
     if (Number.isFinite(known)) {
       el.innerHTML = `${formatNumber(known)} <span class="metric-unit">Mbps</span><span class="metric-checking">checking…</span>`;
     } else {
@@ -421,7 +478,15 @@ function renderHealth(status) {
     if (healthText) healthText.textContent = "";
     health.dataset.state = "";
   }
+  lastFullSpeeds = speedsFromStatus(status, lastFullSpeeds);
   applyIdleStatus();
+}
+
+function metricMbps(index) {
+  if (lastFullSpeeds) return index === 0 ? lastFullSpeeds.download : lastFullSpeeds.upload;
+  const latest = history[history.length - 1];
+  const value = latest ? latest[index + 1] : null;
+  return Number.isFinite(value) ? value : null;
 }
 
 function formatFrequency(minutes) {
@@ -453,17 +518,21 @@ function sendMessage(message) {
   return sendMessageWithRetry((m) => chrome.runtime.sendMessage(m), message);
 }
 
+function renderMetric(id, mbps) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = Number.isFinite(mbps)
+    ? `${formatNumber(mbps)} <span class="metric-unit">Mbps</span>`
+    : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
+}
+
 function render() {
   const latest = history[history.length - 1];
   const isEmpty = !latest;
-  const isTesting = document.getElementById("run-now").getAttribute("aria-busy") === "true";
+  const isTesting = document.getElementById("run-now")?.getAttribute("aria-busy") === "true";
   if (!isTesting) {
-    document.getElementById("download-value").innerHTML = latest
-      ? `${formatNumber(latest[1])} <span class="metric-unit">Mbps</span>`
-      : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
-    document.getElementById("upload-value").innerHTML = latest
-      ? `${formatNumber(latest[2])} <span class="metric-unit">Mbps</span>`
-      : `<span class="metric-empty">—</span><span class="metric-unit">Mbps</span>`;
+    renderMetric("download-value", metricMbps(0));
+    renderMetric("upload-value", metricMbps(1));
   }
   document.getElementById("range-label").textContent = RANGE_LABELS[selectedRange];
   const subtitle = document.getElementById("chart-subtitle");
@@ -760,6 +829,7 @@ async function clearDiagnosticsLogs() {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     shouldShowRatingPrompt,
+    speedsFromStatus,
     CWS_REVIEWS_URL,
     sendMessageWithRetry,
     RATING_STATE_KEY,

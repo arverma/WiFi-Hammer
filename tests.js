@@ -92,8 +92,32 @@ if (JSON.parse(fs.readFileSync("manifest.json", "utf8")).version !== "1.0.7") {
   throw new Error("Manifest version is not 1.0.7");
 }
 const popupCss = fs.readFileSync("popup.css", "utf8");
-if (!popupCss.includes("body.hammering:not(:hover)") || !popupCss.includes("body.hammering:not(:hover) .btn-speed-test[aria-busy=\"true\"] img")) {
-  throw new Error("Hammering animation is not gated by popup hover state");
+if (!popupCss.includes("body.hammering:not(:hover)") || !popupCss.includes("@keyframes vibrate")) {
+  throw new Error("Pointer-off popup shake is missing");
+}
+if (!popupCss.includes("hammer-bob") || popupCss.includes("body.hammering:not(:hover) .btn-speed-test[aria-busy=\"true\"] img")) {
+  throw new Error("Hammer bob must run whether or not the pointer is over the popup");
+}
+if (!popupCss.includes("hammer-letter-0") || !popupCss.includes("hammer-letter-13")) {
+  throw new Error("Hammering Hard letter stagger is missing");
+}
+if (!popupCss.includes(".btn-speed-test[aria-busy=\"true\"]:hover .run-now-cancel") || !popupCss.includes(".btn-speed-test[aria-busy=\"true\"]:hover #run-now-label")) {
+  throw new Error("Cancel must replace the busy Hammer Hard button only on hover");
+}
+const busyBlock = popupCss.match(/\.btn-speed-test\[aria-busy="true"\]\s*\{[^}]+\}/);
+if (!busyBlock || /pointer-events:\s*none/.test(busyBlock[0])) {
+  throw new Error("Busy Hammer Hard button must stay hoverable for Cancel");
+}
+const popupHtml = fs.readFileSync("popup.html", "utf8");
+if (!popupHtml.includes('id="run-now-cancel"') || !popupHtml.includes("Cancel")) {
+  throw new Error("Cancel label is missing from the Hammer Hard button");
+}
+const popupSource = fs.readFileSync("popup.js", "utf8");
+if (!popupSource.includes("setHammerLabel") || !popupSource.includes('HAMMER_LABEL = "Hammer Hard"') || !popupSource.includes('HAMMERING_LABEL = "Hammering Hard"')) {
+  throw new Error("Hammering Hard label typing is missing");
+}
+if (!popupSource.includes('type: "cancelWake"') || !source.includes('type === "cancelWake"')) {
+  throw new Error("Cancel wake messaging is missing");
 }
 
 const sanitized = analytics.sanitizeParams({
@@ -174,6 +198,24 @@ if (!popup.shouldShowRatingPrompt({ successes: 5, dismissedForever: false, lastP
 }
 if (popup.CWS_REVIEWS_URL !== "https://chromewebstore.google.com/detail/wifi-hammer/dbphaafiokokiaocpcnfakompafjoddj/reviews") {
   throw new Error("Rating URL mismatch");
+}
+
+const keptSpeeds = popup.speedsFromStatus(
+  { mode: "probe", lastProbeAt: 1, downloadMbps: 1.1, uploadMbps: 8.7 },
+  { download: 1.1, upload: 8.7 }
+);
+if (keptSpeeds.download !== 1.1 || keptSpeeds.upload !== 8.7) {
+  throw new Error("Probe status replaced the last full-test speeds");
+}
+const fullSpeeds = popup.speedsFromStatus(
+  { mode: "full", downloadMbps: 4.2, uploadMbps: 1.5 },
+  { download: 1.1, upload: 8.7 }
+);
+if (fullSpeeds.download !== 4.2 || fullSpeeds.upload !== 1.5) {
+  throw new Error("A new full test did not replace the shown speeds");
+}
+if (popup.speedsFromStatus({ lastError: "failed" }, null) !== null) {
+  throw new Error("A status without a full test invented speeds");
 }
 
 async function assertDownloadCountsBytesBeforeBodyFinishes() {

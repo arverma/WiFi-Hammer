@@ -381,30 +381,109 @@
       50% { transform: scale(1.015); }
     }
 
-    /* Working: stays readable (no washed-out fade), hammer swings */
+    /* Working: hammer bobs and types "Hammering Hard"; hover replaces the button with Cancel */
     .btn-speed-test[aria-busy="true"] {
       background: rgba(255, 0, 51, .16);
       border-color: rgba(255, 0, 51, .5);
       transform: none;
       box-shadow: none;
-      cursor: progress;
-      pointer-events: none;
+      cursor: pointer;
     }
 
-    body.hammering:not(:hover) .btn-speed-test[aria-busy="true"] img {
-      transform-origin: 85% 85%;
-      animation: hammer-swing .5s ease-in-out infinite alternate;
+    .btn-speed-test .run-now-cancel {
+      display: none;
     }
 
-    @keyframes hammer-swing {
-      from { transform: rotate(-25deg); }
-      to { transform: rotate(20deg); }
+    .btn-speed-test[aria-busy="true"] img {
+      transform-origin: 50% 90%;
+      animation: hammer-bob .42s ease-in-out infinite alternate;
+    }
+
+    .btn-speed-test[aria-busy="true"]:hover {
+      background: #ffffff;
+      border-color: #ffffff;
+      color: var(--upload);
+      box-shadow: 0 0 0 4px rgba(255, 0, 51, .35), 0 8px 24px -4px rgba(255, 255, 255, .3);
+    }
+
+    .btn-speed-test[aria-busy="true"]:hover img,
+    .btn-speed-test[aria-busy="true"]:hover #run-now-label {
+      display: none;
+    }
+
+    .btn-speed-test[aria-busy="true"]:hover .run-now-cancel {
+      display: inline;
+    }
+
+    @keyframes hammer-bob {
+      from { transform: translateY(-5px); }
+      to { transform: translateY(4px); }
+    }
+
+    .btn-speed-test[aria-busy="true"] #run-now-label span {
+      opacity: 0;
+      animation: 2.6s linear infinite;
+    }
+
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(1) { animation-name: hammer-letter-0; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(2) { animation-name: hammer-letter-1; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(3) { animation-name: hammer-letter-2; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(4) { animation-name: hammer-letter-3; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(5) { animation-name: hammer-letter-4; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(6) { animation-name: hammer-letter-5; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(7) { animation-name: hammer-letter-6; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(8) { animation-name: hammer-letter-7; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(9) { animation-name: hammer-letter-8; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(10) { animation-name: hammer-letter-9; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(11) { animation-name: hammer-letter-10; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(12) { animation-name: hammer-letter-11; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(13) { animation-name: hammer-letter-12; }
+    .btn-speed-test[aria-busy="true"] #run-now-label span:nth-child(14) { animation-name: hammer-letter-13; }
+
+    @keyframes hammer-letter-0 { 0% { opacity: 0; } 3%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-1 { 0%, 4% { opacity: 0; } 7%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-2 { 0%, 8% { opacity: 0; } 11%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-3 { 0%, 12% { opacity: 0; } 15%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-4 { 0%, 16% { opacity: 0; } 19%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-5 { 0%, 20% { opacity: 0; } 23%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-6 { 0%, 24% { opacity: 0; } 27%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-7 { 0%, 28% { opacity: 0; } 31%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-8 { 0%, 32% { opacity: 0; } 35%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-9 { 0%, 36% { opacity: 0; } 39%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-10 { 0%, 40% { opacity: 0; } 43%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-11 { 0%, 44% { opacity: 0; } 47%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-12 { 0%, 48% { opacity: 0; } 51%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hammer-letter-13 { 0%, 52% { opacity: 0; } 55%, 88% { opacity: 1; } 100% { opacity: 0; } }
+
+    /* Shake the popup only while the pointer is away; button animations keep running either way */
+    body.hammering:not(:hover) {
+      animation: vibrate 0.1s linear infinite;
+    }
+
+    @keyframes vibrate {
+      0% { transform: translate(1px, 1px) rotate(0deg); }
+      10% { transform: translate(-1px, -2px) rotate(-1deg); }
+      20% { transform: translate(-2px, 0px) rotate(1deg); }
+      30% { transform: translate(2px, 2px) rotate(0deg); }
+      40% { transform: translate(1px, -1px) rotate(1deg); }
+      50% { transform: translate(-1px, 2px) rotate(-1deg); }
+      60% { transform: translate(-2px, 1px) rotate(0deg); }
+      70% { transform: translate(2px, 1px) rotate(-1deg); }
+      80% { transform: translate(-1px, -1px) rotate(1deg); }
+      90% { transform: translate(1px, 2px) rotate(0deg); }
+      100% { transform: translate(1px, -2px) rotate(-1deg); }
     }
 
     @media (prefers-reduced-motion: reduce) {
       .btn-speed-test.confirming,
-      body.hammering:not(:hover) .btn-speed-test[aria-busy="true"] img {
+      .btn-speed-test[aria-busy="true"] img,
+      .btn-speed-test[aria-busy="true"] #run-now-label span,
+      body.hammering:not(:hover) {
         animation: none;
+      }
+
+      .btn-speed-test[aria-busy="true"] #run-now-label span {
+        opacity: 1;
       }
     }
 
@@ -990,25 +1069,6 @@
     /* ── Toggle label hidden (icon-only buttons) */
     .icon-label {
       display: none;
-    }
-
-    /* ── Hammering Animation ── */
-    body.hammering:not(:hover) {
-      animation: vibrate 0.1s linear infinite;
-    }
-
-    @keyframes vibrate {
-      0% { transform: translate(1px, 1px) rotate(0deg); }
-      10% { transform: translate(-1px, -2px) rotate(-1deg); }
-      20% { transform: translate(-2px, 0px) rotate(1deg); }
-      30% { transform: translate(2px, 2px) rotate(0deg); }
-      40% { transform: translate(1px, -1px) rotate(1deg); }
-      50% { transform: translate(-1px, 2px) rotate(-1deg); }
-      60% { transform: translate(-2px, 1px) rotate(0deg); }
-      70% { transform: translate(2px, 1px) rotate(-1deg); }
-      80% { transform: translate(-1px, -1px) rotate(1deg); }
-      90% { transform: translate(1px, 2px) rotate(0deg); }
-      100% { transform: translate(1px, -2px) rotate(-1deg); }
     }
 
     /* ── Rating Prompt Banner ─────────────────────────────── */
