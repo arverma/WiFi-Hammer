@@ -282,15 +282,20 @@ function shouldTriggerWatchdogHammer({ healthy, consecutiveFailures }) {
 async function probeNetwork() {
   const startedAt = performance.now();
   try {
+    // no-cors Fast.com probes can return opaque Responses (ok=false). Still count
+    // elapsed RTT; only timeout / network throw paths are hard failures.
     const response = await fetchWithTimeout(PROBE_URL, {
       cache: "no-store",
       credentials: "omit"
-    }, PROBE_TIMEOUT_MS);
+    }, PROBE_TIMEOUT_MS, { allowOpaque: true });
     const rttMs = Math.round(performance.now() - startedAt);
-    const responseUrl = new URL(response.url || PROBE_URL);
-    const isFastHost = responseUrl.hostname === "fast.com" || responseUrl.hostname.endsWith(".fast.com");
-    if (!isFastHost) {
-      throw new Error("Network probe was redirected.");
+    const isOpaque = response.type === "opaque";
+    if (!isOpaque) {
+      const responseUrl = new URL(response.url || PROBE_URL);
+      const isFastHost = responseUrl.hostname === "fast.com" || responseUrl.hostname.endsWith(".fast.com");
+      if (!isFastHost) {
+        throw new Error("Network probe was redirected.");
+      }
     }
     await response.body?.cancel?.();
     return { healthy: rttMs <= PROBE_RTT_THRESHOLD_MS, rttMs };
@@ -308,6 +313,10 @@ async function runWatchdogCycle() {
   if (!state.enabled) return;
 
   const probe = await probeNetwork();
+  // User may have paused while the probe was in flight — drop the result.
+  const stateAfter = await getMonitoringState();
+  if (!stateAfter.enabled) return;
+
   const stored = await chrome.storage.local.get([PROBE_FAILURES_KEY, STATUS_KEY]);
   const previousFailures = Number.isFinite(stored[PROBE_FAILURES_KEY]) ? stored[PROBE_FAILURES_KEY] : 0;
   const consecutiveFailures = probe.healthy ? 0 : previousFailures + 1;
@@ -328,7 +337,7 @@ async function runWatchdogCycle() {
     result: probe.healthy ? "ok" : "fail",
     failure_count: consecutiveFailures,
     threshold_ms: PROBE_RTT_THRESHOLD_MS,
-    interval_minutes: state.minutes
+    interval_minutes: stateAfter.minutes
   };
   if (Number.isFinite(probe.rttMs)) probeParams.rtt_ms = probe.rttMs;
   if (probe.errorType) probeParams.error_type = probe.errorType;
@@ -341,7 +350,7 @@ async function runWatchdogCycle() {
     reason: "consecutive_probe_failures",
     consecutive_failures: consecutiveFailures,
     threshold_ms: PROBE_RTT_THRESHOLD_MS,
-    interval_minutes: state.minutes
+    interval_minutes: stateAfter.minutes
   };
   if (Number.isFinite(probe.rttMs)) triggerParams.rtt_ms = probe.rttMs;
   sendAnalyticsEvent("auto_hammer_triggered", triggerParams);
@@ -690,7 +699,7 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS, { allowOpaque = false } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const externalSignal = options.signal;
@@ -701,7 +710,7 @@ async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS) {
       ...options,
       signal: controller.signal
     });
-    if (!response.ok) {
+    if (!response.ok && !(allowOpaque && response.type === "opaque")) {
       throw new Error(`Network failed (${response.status}).`);
     }
     return response;

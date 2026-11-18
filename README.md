@@ -49,10 +49,10 @@ The zip contains the popup, service worker, analytics and diagnostics scripts, i
 
 **Network traffic:**
 - **Fast.com and Netflix Open Connect:** the speed-test servers used for waking and measuring.
-- **Google Analytics:** WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. Events cover popup usage, network probes, automatic recovery decisions, pressing Hammer Hard, turning auto wake on or off, changing the interval, wake success or failure, and the rating prompt. They include anonymous before/after speed readings in Mbps, probe results and timing, your parsed operating system (`os`), parsed Chrome version (`chrome_version`), the extension version, and a random ID generated on your device that isn't linked to you. It never sends raw user-agent strings, SSIDs, visited URLs, or IP addresses.
+- **Google Analytics:** WiFi Hammer sends anonymous usage events (no URLs, IPs, or personal data) to Google Analytics to help improve the extension. Events cover popup usage, network probes, automatic recovery decisions, pressing Hammer Hard, turning auto hammer on or off, changing the check interval, wake success or failure, and the rating prompt. They include anonymous before/after speed readings in Mbps, probe results and timing, your parsed operating system (`os`), parsed Chrome version (`chrome_version`), the extension version, and a random ID generated on your device that isn't linked to you. It never sends raw user-agent strings, SSIDs, visited URLs, or IP addresses.
 - **Uninstall feedback:** after uninstalling, you land on an optional feedback form. The link carries the extension version, operating system, days installed and wake counts.
 
-**Permissions:** `alarms` for the schedule, `storage` for local data, and host access limited to `fast.com` and `nflxvideo.net`. Analytics needs no host permission.
+**Permissions:** `alarms` for the watchdog check timer, `storage` for local data, and host access limited to `fast.com` and `nflxvideo.net`. Analytics needs no host permission.
 
 Fast.com's API is undocumented and may change. If it does, the extension shows the failure and records nothing made up. The watchdog uses only an already-permitted Fast.com request and does not add a host permission.
 

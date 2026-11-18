@@ -30,12 +30,19 @@ const context = {
   performance,
   trackEvent: (name, params) => installationEvents.push({ name, params })
 };
-vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testProbeNetwork = probeNetwork; this.testFetchFastConfig = fetchFastConfig; this.testShouldTriggerWatchdogHammer = shouldTriggerWatchdogHammer; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
+vm.runInNewContext(`${source}\nthis.testPrune = pruneHistory; this.testFrequency = normalizeFrequency; this.testRange = rangeUrl; this.testHistoryKeys = { wake: WAKE_HISTORY_KEY, real: REAL_TEST_HISTORY_KEY }; this.testReadMeasuredBody = readMeasuredBody; this.testCategorizeWakeError = categorizeWakeError; this.testBuildUninstallURL = buildUninstallURL; this.testSyncUninstallURL = syncUninstallURL; this.testHandleInstalled = handleInstalled; this.testProbeNetwork = probeNetwork; this.testFetchFastConfig = fetchFastConfig; this.testShouldTriggerWatchdogHammer = shouldTriggerWatchdogHammer; this.testSetMonitoring = setMonitoring; this.testRunWatchdogCycle = runWatchdogCycle; this.testEnsureAlarm = ensureAlarm; this.testProbeFailuresKey = PROBE_FAILURES_KEY; this.testMonitoringKey = MONITORING_KEY; this.testAlarmName = ALARM_NAME; this.testInstallKeys = { date: INSTALL_DATE_KEY, attempts: WAKE_ATTEMPTS_KEY, successes: WAKE_SUCCESSES_KEY };`, context);
 
 context.testHandleInstalled({ reason: "install" });
 context.testHandleInstalled({ reason: "update", previousVersion: "1.0.5" });
+context.testHandleInstalled({ reason: "chrome_update" });
 if (installationEvents.length !== 1 || installationEvents[0].name !== "extension_installed") {
   throw new Error("extension_installed was not limited to fresh installs");
+}
+
+for (const file of ["background.js", "popup.js", "analytics.js", "popup.html"]) {
+  if (fs.readFileSync(file, "utf8").includes("wake_failed")) {
+    throw new Error(`wake_failed typo is still present in ${file}`);
+  }
 }
 
 const now = 1_000_000_000;
@@ -303,12 +310,16 @@ async function assertAnalyticsStorageAndSend() {
 
 async function assertWatchdogProbe() {
   let cancelled = false;
+  let nowMs = 1000;
+  context.performance = { now: () => nowMs };
   context.fetch = async (url, options) => {
     if (url !== "https://fast.com/favicon.ico" || options.cache !== "no-store" || options.credentials !== "omit") {
       throw new Error("Watchdog probe request was not configured correctly");
     }
+    nowMs += 50;
     return {
       ok: true,
+      type: "basic",
       url,
       body: { cancel: async () => { cancelled = true; } }
     };
@@ -322,6 +333,443 @@ async function assertWatchdogProbe() {
   }
   if (!context.testShouldTriggerWatchdogHammer({ healthy: false, consecutiveFailures: 2 })) {
     throw new Error("Watchdog did not hammer after two failed probes");
+  }
+
+  // Opaque (no-cors) responses still count elapsed RTT as a success path.
+  cancelled = false;
+  nowMs = 2000;
+  context.fetch = async (url) => {
+    nowMs += 80;
+    return {
+      ok: false,
+      status: 0,
+      type: "opaque",
+      url: "",
+      body: { cancel: async () => { cancelled = true; } }
+    };
+  };
+  const opaque = await context.testProbeNetwork();
+  if (!opaque.healthy || opaque.rttMs < 80 || !cancelled) {
+    throw new Error("Opaque probe response was not treated as a timed success");
+  }
+
+  // Timeout / abort → failure
+  context.fetch = async (_url, options) => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (options.signal?.aborted) {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    throw new Error("The operation timed out");
+  };
+  // Force immediate abort by using a tiny timeout path: emulate abort via throwing AbortError
+  context.fetch = async () => {
+    const err = new Error("The operation was aborted");
+    err.name = "AbortError";
+    throw err;
+  };
+  const timedOut = await context.testProbeNetwork();
+  if (timedOut.healthy || timedOut.errorType !== "timeout") {
+    throw new Error("Probe timeout/abort was not counted as a failure");
+  }
+
+  // Network error → failure
+  context.fetch = async () => {
+    throw new Error("Failed to fetch");
+  };
+  const netErr = await context.testProbeNetwork();
+  if (netErr.healthy || !netErr.errorType) {
+    throw new Error("Probe network error was not counted as a failure");
+  }
+
+  // Slow-but-ok response over RTT threshold → unhealthy
+  nowMs = 5000;
+  context.fetch = async (url) => {
+    nowMs += 3500;
+    return {
+      ok: true,
+      type: "basic",
+      url: url || "https://fast.com/favicon.ico",
+      body: { cancel: async () => {} }
+    };
+  };
+  const slow = await context.testProbeNetwork();
+  if (slow.healthy || slow.rttMs < 3000) {
+    throw new Error("Slow successful probe was not marked unhealthy");
+  }
+}
+
+function createWatchdogHarness({ analytics = false } = {}) {
+  const store = { local: {}, session: {} };
+  const alarms = new Map();
+  const alarmListeners = [];
+  const installedListeners = [];
+  const analyticsEvents = [];
+  let fetchImpl = async () => {
+    throw new Error("fetch not stubbed");
+  };
+  let nowMs = 1_000;
+
+  const chromeMock = {
+    runtime: {
+      onInstalled: {
+        addListener(fn) {
+          installedListeners.push(fn);
+        }
+      },
+      onStartup: { addListener() {} },
+      onMessage: { addListener() {} },
+      sendMessage: async () => {},
+      setUninstallURL: async () => {},
+      getPlatformInfo: async () => ({ os: "mac" }),
+      getBrowserInfo: async () => ({ browser: "Chrome", version: "131.0.6778.86" }),
+      getManifest: () => ({ version: "1.0.7" })
+    },
+    alarms: {
+      create: async (name, info) => {
+        alarms.set(name, info || {});
+      },
+      clear: async (name) => {
+        const existed = alarms.has(name);
+        alarms.delete(name);
+        return existed;
+      },
+      onAlarm: {
+        addListener(fn) {
+          alarmListeners.push(fn);
+        }
+      }
+    },
+    storage: {
+      local: {
+        get: async (keys) => {
+          if (keys == null) return { ...store.local };
+          if (typeof keys === "string") return { [keys]: store.local[keys] };
+          if (Array.isArray(keys)) {
+            const out = {};
+            for (const k of keys) out[k] = store.local[k];
+            return out;
+          }
+          const out = { ...keys };
+          for (const k of Object.keys(keys)) {
+            if (k in store.local) out[k] = store.local[k];
+          }
+          return out;
+        },
+        set: async (items) => Object.assign(store.local, items)
+      },
+      session: {
+        get: async (keys) => {
+          if (typeof keys === "string") return { [keys]: store.session[keys] };
+          if (Array.isArray(keys)) {
+            const out = {};
+            for (const k of keys) out[k] = store.session[k];
+            return out;
+          }
+          return {};
+        },
+        set: async (items) => Object.assign(store.session, items)
+      }
+    }
+  };
+
+  const mockContext = {
+    chrome: chromeMock,
+    console: {
+      ...console,
+      warn() {},
+      log() {}
+    },
+    setTimeout,
+    clearTimeout,
+    URL,
+    URLSearchParams,
+    AbortController,
+    performance: { now: () => nowMs },
+    crypto: { randomUUID: () => "watchdog-test-uuid" },
+    navigator: { onLine: true },
+    Date,
+    fetch: (...args) => fetchImpl(...args),
+    ANALYTICS_CONFIG: analytics
+      ? { MEASUREMENT_ID: "G-TEST12345", API_SECRET: "test-secret" }
+      : { MEASUREMENT_ID: "", API_SECRET: "" },
+    trackEvent: (name, params) => analyticsEvents.push({ name, params })
+  };
+  mockContext.self = mockContext;
+  mockContext.globalThis = mockContext;
+
+  if (analytics) {
+    const analyticsSource = fs.readFileSync("analytics.js", "utf8");
+    vm.runInNewContext(analyticsSource, mockContext);
+    mockContext.trackEvent = (name, params) => mockContext.WiFiHammerAnalytics.trackEvent(name, params);
+  }
+
+  const bgSource = fs.readFileSync("background.js", "utf8");
+  vm.runInNewContext(
+    `${bgSource}
+this.testSetMonitoring = setMonitoring;
+this.testRunWatchdogCycle = runWatchdogCycle;
+this.testEnsureAlarm = ensureAlarm;
+this.testHandleInstalled = handleInstalled;
+this.testProbeNetwork = probeNetwork;
+this.testFetchFastConfig = fetchFastConfig;
+this.testProbeFailuresKey = PROBE_FAILURES_KEY;
+this.testMonitoringKey = MONITORING_KEY;
+this.testAlarmName = ALARM_NAME;
+this.testShouldTriggerWatchdogHammer = shouldTriggerWatchdogHammer;`,
+    mockContext
+  );
+
+  return {
+    ctx: mockContext,
+    store,
+    alarms,
+    alarmListeners,
+    installedListeners,
+    analyticsEvents,
+    setFetch(fn) {
+      fetchImpl = fn;
+    },
+    advance(ms) {
+      nowMs += ms;
+    },
+    setNow(ms) {
+      nowMs = ms;
+    }
+  };
+}
+
+async function assertWatchdogLifecycleAndCounting() {
+  const h = createWatchdogHarness();
+  const failKey = h.ctx.testProbeFailuresKey;
+  const monKey = h.ctx.testMonitoringKey;
+  const alarmName = h.ctx.testAlarmName;
+  let hammerFetches = 0;
+  let probeFetches = 0;
+
+  const probeOk = () => {
+    h.advance(40);
+    return {
+      ok: true,
+      type: "basic",
+      url: "https://fast.com/favicon.ico",
+      body: { cancel: async () => {} }
+    };
+  };
+  const probeFail = () => {
+    throw new Error("Failed to fetch");
+  };
+
+  // Seed prior failures, then a successful probe resets to 0 (1a).
+  h.store.local[monKey] = true;
+  h.store.local[failKey] = 5;
+  h.setFetch(async (url) => {
+    if (String(url).includes("favicon.ico")) {
+      probeFetches += 1;
+      return probeOk();
+    }
+    throw new Error("unexpected fetch " + url);
+  });
+  await h.ctx.testRunWatchdogCycle();
+  if (h.store.local[failKey] !== 0) {
+    throw new Error("Successful probe did not reset consecutive failures to 0");
+  }
+
+  // Turning auto-hammer off clears alarm + failure count; no probes while off (1b).
+  h.store.local[failKey] = 2;
+  await h.ctx.testSetMonitoring(true);
+  if (!h.alarms.has(alarmName)) throw new Error("Enabling monitoring did not create the watchdog alarm");
+  probeFetches = 0;
+  await h.ctx.testSetMonitoring(false);
+  if (h.alarms.has(alarmName)) throw new Error("Disabling monitoring did not clear the watchdog alarm");
+  if (h.store.local[failKey] !== 0) throw new Error("Disabling monitoring did not clear failure count");
+  await h.ctx.testRunWatchdogCycle();
+  if (probeFetches !== 0) throw new Error("Probe ran while auto-hammer was off");
+
+  // Turning back on starts from 0 — one failure does not hammer (1b).
+  hammerFetches = 0;
+  await h.ctx.testSetMonitoring(true);
+  h.setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("favicon.ico")) {
+      probeFetches += 1;
+      return probeFail();
+    }
+    hammerFetches += 1;
+    throw new Error("offline");
+  });
+  probeFetches = 0;
+  await h.ctx.testRunWatchdogCycle();
+  if (h.store.local[failKey] !== 1) throw new Error("Expected failure count 1 after first fail");
+  if (hammerFetches !== 0) throw new Error("Hammered immediately after re-enabling on first failure");
+
+  // Pause mid-probe must not record failures.
+  h.store.local[failKey] = 0;
+  let releaseProbe;
+  const probeGate = new Promise((resolve) => {
+    releaseProbe = resolve;
+  });
+  h.setFetch(async (url) => {
+    if (String(url).includes("favicon.ico")) {
+      await probeGate;
+      throw new Error("Failed to fetch");
+    }
+    throw new Error("unexpected");
+  });
+  const midProbe = h.ctx.testRunWatchdogCycle();
+  await h.ctx.testSetMonitoring(false);
+  releaseProbe();
+  await midProbe;
+  if (h.store.local[failKey] !== 0) {
+    throw new Error("Paused mid-probe still recorded a failure count");
+  }
+
+  // Two consecutive failures trigger hammer; count resets; next hammer needs two new failures (1a, 1e).
+  await h.ctx.testSetMonitoring(true);
+  h.store.local[failKey] = 0;
+  let hammers = 0;
+  // Return an empty target list so the hard wake fails immediately (no 90s recovery loop).
+  const failingHardWakeFetch = async (url) => {
+    const u = String(url);
+    if (u.includes("favicon.ico")) {
+      throw new Error("Failed to fetch");
+    }
+    hammers += 1;
+    if (u.includes("api.fast.com")) {
+      return { ok: true, json: async () => ({ targets: [] }) };
+    }
+    return { ok: true, text: async () => "<html></html>" };
+  };
+  h.setFetch(failingHardWakeFetch);
+  await h.ctx.testRunWatchdogCycle();
+  if (h.store.local[failKey] !== 1 || hammers !== 0) {
+    throw new Error("First consecutive failure should not hammer");
+  }
+  try {
+    await h.ctx.testRunWatchdogCycle();
+  } catch {
+    // Hard wake is stubbed to fail; failure count is reset before it runs.
+  }
+  if (hammers < 1) throw new Error("Second consecutive failure did not trigger a watchdog hammer");
+  if (h.store.local[failKey] !== 0) {
+    throw new Error("Watchdog hammer did not reset consecutive failures to 0");
+  }
+  hammers = 0;
+  await h.ctx.testRunWatchdogCycle();
+  if (h.store.local[failKey] !== 1 || hammers !== 0) {
+    throw new Error("After reset, a single new failure must not hammer again");
+  }
+  try {
+    await h.ctx.testRunWatchdogCycle();
+  } catch {
+    // expected hard-wake failure
+  }
+  if (hammers < 1) throw new Error("Two new consecutive failures did not hammer again");
+  if (h.store.local[failKey] !== 0) {
+    throw new Error("Second hammer did not reset failure count");
+  }
+}
+
+async function assertWatchdogUpgradeFrom106() {
+  const h = createWatchdogHarness();
+  // 1.0.6 with auto-hammer on: monitoringEnabled true (or unset → defaults on).
+  h.store.local[h.ctx.testMonitoringKey] = true;
+  h.store.local.frequencyMinutes = 30;
+  // Pretend an old scheduled pulse alarm exists under the same name.
+  h.alarms.set(h.ctx.testAlarmName, { periodInMinutes: 30, legacy: true });
+
+  let probeOnly = 0;
+  let hardWake = 0;
+  h.setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("favicon.ico")) {
+      probeOnly += 1;
+      h.advance(30);
+      return {
+        ok: true,
+        type: "basic",
+        url: "https://fast.com/favicon.ico",
+        body: { cancel: async () => {} }
+      };
+    }
+    hardWake += 1;
+    throw new Error("unexpected hard wake");
+  });
+
+  await h.ctx.testHandleInstalled({ reason: "update", previousVersion: "1.0.6" });
+  // ensureAlarm is fire-and-forget inside handleInstalled; wait a tick.
+  await new Promise((r) => setTimeout(r, 20));
+
+  if (h.store.local[h.ctx.testMonitoringKey] !== true) {
+    throw new Error("Upgrade from 1.0.6 did not keep auto-hammer on");
+  }
+  const alarm = h.alarms.get(h.ctx.testAlarmName);
+  if (!alarm || alarm.legacy) {
+    throw new Error("Upgrade did not re-register the watchdog alarm");
+  }
+  if (typeof alarm.periodInMinutes !== "number") {
+    throw new Error("Watchdog alarm missing periodInMinutes");
+  }
+
+  if (h.alarmListeners.length < 1) {
+    throw new Error("Alarm listener was not registered");
+  }
+  await h.alarmListeners[0]({ name: h.ctx.testAlarmName });
+  await new Promise((r) => setTimeout(r, 20));
+  if (probeOnly < 1) throw new Error("Post-upgrade alarm did not run a watchdog probe");
+  if (hardWake !== 0) throw new Error("Post-upgrade alarm still ran a scheduled hard pulse");
+}
+
+async function assertWatchdogAnalyticsEvents() {
+  const h = createWatchdogHarness({ analytics: true });
+  const captured = [];
+  h.setFetch(async (url, opts) => {
+    if (String(url).includes("google-analytics.com")) {
+      captured.push(JSON.parse(opts.body));
+      return { ok: true, status: 204 };
+    }
+    if (String(url).includes("favicon.ico")) {
+      h.advance(40);
+      throw new Error("Failed to fetch");
+    }
+    if (String(url).includes("api.fast.com")) {
+      return { ok: true, json: async () => ({ targets: [] }) };
+    }
+    return { ok: true, text: async () => "<html></html>" };
+  });
+
+  await h.ctx.testSetMonitoring(true);
+  h.store.local[h.ctx.testProbeFailuresKey] = 0;
+
+  await h.ctx.testRunWatchdogCycle();
+  try {
+    await h.ctx.testRunWatchdogCycle();
+  } catch {
+    // hard wake stubbed to fail
+  }
+
+  // Allow analytics promises to settle.
+  await new Promise((r) => setTimeout(r, 50));
+
+  const flatEvents = captured.flatMap((payload) => payload.events || []);
+  const probeEvents = flatEvents.filter((e) => e.name === "network_probe");
+  const triggerEvents = flatEvents.filter((e) => e.name === "auto_hammer_triggered");
+  if (probeEvents.length < 2) throw new Error("Expected network_probe GA4 events");
+  if (triggerEvents.length < 1) throw new Error("Expected auto_hammer_triggered GA4 event");
+
+  for (const event of [...probeEvents, ...triggerEvents]) {
+    const p = event.params || {};
+    if (!Number.isFinite(p.session_id)) {
+      throw new Error(`${event.name} missing session_id`);
+    }
+    if (p.engagement_time_msec !== 100) {
+      throw new Error(`${event.name} missing engagement_time_msec`);
+    }
+    if (p.os !== "mac") throw new Error(`${event.name} missing os`);
+    if (p.chrome_version !== "131.0.6778.86") {
+      throw new Error(`${event.name} missing chrome_version`);
+    }
   }
 }
 
@@ -430,10 +878,43 @@ async function assertDiagnosticsLogger() {
   delete global.chrome;
 }
 
+async function assertFetchFastConfigRecovery() {
+  // Dedicated harness so this does not race other tests that stub shared context.fetch.
+  const h = createWatchdogHarness();
+  let configCalls = 0;
+  h.setFetch(async (url) => {
+    const u = String(url);
+    if (!u.includes("api.fast.com")) throw new Error("offline");
+    configCalls += 1;
+    if (configCalls < 4) throw new Error("offline");
+    return { ok: true, json: async () => ({ targets: [{ url: "https://x/speedtest" }] }) };
+  });
+
+  const config = await h.ctx.testFetchFastConfig({ recoveryWindowMs: 5000, retryDelayMs: 1 });
+  if (configCalls !== 4 || config.targets.length !== 1) {
+    throw new Error("fetchFastConfig did not retry until recovery");
+  }
+
+  h.setFetch(async () => {
+    throw new Error("offline");
+  });
+  let failed = false;
+  try {
+    await h.ctx.testFetchFastConfig({ recoveryWindowMs: 20, retryDelayMs: 5 });
+  } catch (e) {
+    failed = /speed test/.test(e.message);
+  }
+  if (!failed) throw new Error("fetchFastConfig should fail after the recovery window");
+}
+
 Promise.all([
   assertDownloadCountsBytesBeforeBodyFinishes(),
   assertAnalyticsStorageAndSend(),
   assertWatchdogProbe(),
+  assertWatchdogLifecycleAndCounting(),
+  assertWatchdogUpgradeFrom106(),
+  assertWatchdogAnalyticsEvents(),
+  assertFetchFastConfigRecovery(),
   assertUninstallURLSync(),
   assertDiagnosticsLogger()
 ])
@@ -442,26 +923,3 @@ Promise.all([
     console.error(error);
     process.exitCode = 1;
   });
-
-// Regression: connection drops while the router wakes, then returns. fetchFastConfig
-// must ride it out instead of failing on the first unreachable attempt.
-(async () => {
-  let configCalls = 0;
-  context.fetch = async (url) => {
-    const u = String(url);
-    if (!u.includes("api.fast.com")) throw new Error("offline");
-    configCalls += 1;
-    if (configCalls < 4) throw new Error("offline");
-    return { ok: true, json: async () => ({ targets: [{ url: "https://x/speedtest" }] }) };
-  };
-  const config = await context.testFetchFastConfig({ recoveryWindowMs: 5000, retryDelayMs: 1 });
-  if (configCalls !== 4 || config.targets.length !== 1) throw new Error("fetchFastConfig did not retry until recovery");
-
-  context.fetch = async () => { throw new Error("offline"); };
-  let failed = false;
-  try { await context.testFetchFastConfig({ recoveryWindowMs: 20, retryDelayMs: 5 }); } catch (e) {
-    failed = /speed test/.test(e.message);
-  }
-  if (!failed) throw new Error("fetchFastConfig should fail after the recovery window");
-  console.log("recovery-retry tests passed");
-})().catch((e) => { console.error(e); process.exit(1); });
