@@ -2,6 +2,8 @@
 
 A Chrome extension that wakes a stuck Wi‑Fi connection with one click, so you don't have to walk to the router and restart it. Built for sticky Airtel and Jio connections, and useful on any broadband.
 
+**Learn more:** [WiFi Hammer project page](https://arverma.dev/projects/wifi-hammer/) | [Install from Chrome Web Store](https://chromewebstore.google.com/detail/wifi-hammer-fix-airteljio/dbphaafiokokiaocpcnfakompafjoddj)
+
 ## How it works
 
 Stuck Wi‑Fi is usually an idle link, not a broken router. WiFi Hammer sends real traffic through the connection to wake it up, using Fast.com's test servers.
@@ -57,3 +59,25 @@ The zip contains the popup, service worker, analytics and diagnostics scripts, i
 Fast.com's API is undocumented and may change. If it does, the extension shows the failure and records nothing made up. The watchdog uses only an already-permitted Fast.com request and does not add a host permission.
 
 This extension does not make your plan faster. It only wakes a stuck connection.
+
+## WiFi connected but no internet?
+
+If WiFi shows connected but pages will not load on Airtel, Jio, or any broadband, check the lights on your router first, restart it if needed, then try WiFi Hammer. For detailed step by step troubleshooting, see the guide at [arverma.dev/guides/wifi-connected-no-internet](https://arverma.dev/guides/wifi-connected-no-internet/).
+
+## Common questions
+
+**Does it make my internet faster?**
+No. WiFi Hammer only wakes a stuck connection. It does not speed up your plan or improve signal strength.
+
+**Does it use data?**
+Auto hammer uses tiny requests (a few kilobytes). Hammer Hard runs a full speed test and can use several megabytes depending on your connection speed. On a limited plan, use Hammer Hard sparingly.
+
+**Is it safe?**
+Yes. Host access is limited to fast.com and nflxvideo.net (Netflix's test servers). The extension has no access to other sites you visit.
+
+**What does it send to Google Analytics?**
+WiFi Hammer sends anonymous usage events (button presses, probe results, speeds in Mbps, extension version, parsed OS and Chrome version, a random device ID). It does not send URLs, IP addresses, SSIDs, or personal data. See the Privacy and permissions section above for full details.
+
+## About the author
+
+Built by [Aman Ranjan Verma](https://arverma.dev), senior data engineer. More projects at [arverma.dev](https://arverma.dev) and [@100pebhari](https://x.com/100pebhari) on X.

@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this extension, please cite it as below."
+title: "WiFi Hammer: Fix Airtel/Jio No-Internet Wi-Fi"
+authors:
+  - family-names: Verma
+    given-names: Aman Ranjan
+    website: https://arverma.dev
+type: software
+repository-code: "https://github.com/arverma/WiFi-Hammer"
+url: "https://chromewebstore.google.com/detail/wifi-hammer-fix-airteljio/dbphaafiokokiaocpcnfakompafjoddj"
+license: MIT
